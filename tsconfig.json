@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false,
+    "target": "ES2020", 
+    "module": "commonjs", 
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "lib": ["es2020"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts" // ensure all custom types are picked up
+  ]
+}
