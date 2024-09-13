@@ -1,6 +1,6 @@
 // src/services/kycService.ts
 import axios from 'axios';
-import { UserKYCData, KYCResponse } from '../types/kyc';
+import { UserKYCData, KYCResponse } from '../../types/kyc';
 
 const KYC_API_URL = process.env.KYC_API_URL!;
 const KYC_API_KEY = process.env.KYC_API_KEY!;

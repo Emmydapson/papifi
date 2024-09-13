@@ -1,0 +1,26 @@
+{
+    "version": 2,
+    "builds": [
+      {
+        "src": "src/index.ts",  
+        "use": "@vercel/node"
+      }
+    ],
+    "routes": [
+      {
+        "src": "/(.*)",
+        "dest": "src/index.ts"  
+      }
+    ],
+    "env": {
+      "NODE_ENV": "production",
+      "DATABASE_URL": "@database_url",
+      "SMTP_HOST": "@smtp_host",
+      "SMTP_PORT": "@smtp_port",
+      "SMTP_USER": "@smtp_user",
+      "SMTP_PASS": "@smtp_pass",
+      "JWT_SECRET": "@jwt_secret",
+      "SESSION_SECRET": "@session_secret"
+    }
+  }
+  

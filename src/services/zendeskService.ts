@@ -3,7 +3,7 @@ import axios from 'axios';
 
 const ZENDESK_API_URL = 'https://your-zendesk-domain.zendesk.com/api/v2/tickets.json';
 const ZENDESK_EMAIL = process.env.ZENDESK_EMAIL;
-const ZENDESK_API_TOKEN = process.env.ZENDESK_API_TOKEN;
+const ZENDESK_API_TOKEN = process.env.ZENDESK_API_TOKEN || 'fallback_token';
 
 export const createSupportTicket = async (userEmail: string, subject: string, description: string) => {
   try {

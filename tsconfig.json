@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    "outDir": "./dist", // Ensure this is set to "dist"
+    "rootDir": "./src", // Ensure this is set to "src"
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "strictPropertyInitialization": false,
@@ -7,13 +9,13 @@
     "module": "commonjs", 
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
-    "lib": ["es2020"]
+    "lib": ["es2020"],
+    "typeRoots": ["./node_modules/@types", "types"]
   },
   "include": [
     "src/**/*.ts",
-    "src/**/*.d.ts" // ensure all custom types are picked up
+    "types/**/*.d.ts" // Include custom types in root folder
   ]
 }
