@@ -7,9 +7,9 @@ import { submitSupportRequest } from '../controllers/profileController';
 
 const router = Router();
 
-router.post('/profile', authMiddleware, createUserProfile);
-router.get('/profile', authMiddleware, getUserProfile);
-router.put('/profile', authMiddleware, updateUserProfile);
+router.post('/', authMiddleware, createUserProfile);
+router.get('/', authMiddleware, getUserProfile);
+router.put('/', authMiddleware, updateUserProfile);
 router.put('/change-password', authMiddleware, changePassword);
 router.post('/support', authMiddleware, submitSupportRequest);
 

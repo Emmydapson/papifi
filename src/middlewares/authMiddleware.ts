@@ -15,9 +15,9 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
   }
 
   try {
-    // Decode the token and assign it to req.user
-    const decoded = jwt.verify(token, jwtSecret) as JwtPayload & { id: string, email: string };
-    req.user = decoded;
+    const decoded = jwt.verify(token, jwtSecret) as JwtPayload & { userId: string, email: string, fullName: string, gender: string};
+    console.log('Decoded token:', decoded);
+    req.user = { id: decoded.userId, email: decoded.email, fullName: decoded.fullName, gender: decoded.gender };
     next();
   } catch (error) {
     return res.status(401).json({ message: 'Invalid token' });

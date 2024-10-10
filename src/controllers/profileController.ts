@@ -57,15 +57,33 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'User ID not found in token' });
   }
 
-  const { fullName, address, phoneNumber, country, dateOfBirth, gender, nationality } = req.body;
+  const { address, phoneNumber, country, nationality } = req.body;
+
+  // Check if any disallowed fields are included in the request body
+  const disallowedFields = ['fullName', 'dateOfBirth', 'gender'];
+  const hasDisallowedField = disallowedFields.some(field => req.body[field]);
+
+  if (hasDisallowedField) {
+    return res.status(400).json({ message: 'Cannot update fullName, gender or dateOfBirth' });
+  }
+
+  // Prepare the update object, filtering out undefined properties
+  const updateFields: Partial<{ address: string; phoneNumber: string; country: string; gender: string; nationality: string }> = {};
+
+  if (address) updateFields.address = address;
+  if (phoneNumber) updateFields.phoneNumber = phoneNumber;
+  if (country) updateFields.country = country;
+  if (nationality) updateFields.nationality = nationality;
 
   try {
-    const updatedProfile = await updateProfile(userId, { fullName, address, phoneNumber, country, dateOfBirth, gender, nationality });
+    const updatedProfile = await updateProfile(userId, updateFields);
     res.status(200).json(updatedProfile);
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
   }
 };
+
+
 
 export const changePassword = async (req: Request, res: Response) => {
     if (!req.user) {

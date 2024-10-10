@@ -1,26 +1,33 @@
 {
-    "version": 2,
-    "builds": [
-      {
-        "src": "src/index.ts",  
-        "use": "@vercel/node"
-      }
-    ],
-    "routes": [
-      {
-        "src": "/(.*)",
-        "dest": "src/index.ts"  
-      }
-    ],
-    "env": {
-      "NODE_ENV": "production",
-      "DATABASE_URL": "@database_url",
-      "SMTP_HOST": "@smtp_host",
-      "SMTP_PORT": "@smtp_port",
-      "SMTP_USER": "@smtp_user",
-      "SMTP_PASS": "@smtp_pass",
-      "JWT_SECRET": "@jwt_secret",
-      "SESSION_SECRET": "@session_secret"
+  "version": 2,
+  "builds": [
+    {
+      "src": "src/index.ts",
+      "use": "@vercel/node"
     }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/src/index.ts"
+    }
+  ],
+  "env": {
+    "DB_HOST": "@DB_HOST",
+    "DB_PORT": "@DB_PORT",
+    "DB_USERNAME": "@DB_USERNAME",
+    "DB_PASSWORD": "@DB_PASSWORD",
+    "DB_NAME": "@DB_NAME",
+    "DATABASE_URL": "@DATABASE_URL",
+    "SMTP_HOST": "@SMTP_HOST",
+    "SMTP_PORT": "@SMTP_PORT",
+    "SMTP_USER": "@SMTP_USER",
+    "SMTP_PASS": "@SMTP_PASS",
+    "SMTP_FROM_EMAIL": "@SMTP_FROM_EMAIL",
+    "JWT_SECRET": "@JWT_SECRET",
+    "SESSION_SECRET": "@SESSION_SECRET",
+    "PAYSHIGA_BASE_URL": "@PAYSHIGA_BASE_URL",
+    "PAYSHIGA_PUBLIC_KEY": "@PAYSHIGA_PUBLIC_KEY",
+    "PAYSHIGA_SECRET_KEY": "@PAYSHIGA_SECRET_KEY"
   }
-  
+}

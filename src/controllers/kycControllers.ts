@@ -1,23 +1,24 @@
-
+// kycController.ts
 import { Request, Response } from 'express';
-import { verifyUserKYC } from '../services/kycService'; 
+import payshigaService from '../services/walletService'; // Ensure correct service path
+import { KYCData } from '../../types/kyc'; // Adjust import path if needed
 
-export const verifyKYCController = async (req: Request, res: Response) => {
-  try {
-    const { userId, userData } = req.body;
+class KYCController {
+  async verifyKYC(req: Request, res: Response) {
+    const { userId, kycData }: { userId: string; kycData: KYCData } = req.body;
 
-    if (!userId || !userData) {
-      return res.status(400).json({ message: 'User ID and data are required' });
+    try {
+      const kycResult = await payshigaService.verifyKYC(userId, kycData);
+      res.status(200).json(kycResult);
+    } catch (error: unknown) {
+      // Type-safe error handling
+      if (error instanceof Error) {
+        res.status(500).json({ message: 'Error verifying KYC', error: error.message });
+      } else {
+        res.status(500).json({ message: 'Unknown error occurred during KYC verification' });
+      }
     }
-
-    const result = await verifyUserKYC(userId, userData);
-
-    // Update user KYC status based on result
-    // ...
-
-    res.status(200).json({ message: 'KYC verification processed', result });
-  } catch (error) {
-    console.error('Error processing KYC:', error);
-    res.status(500).json({ message: 'Error processing KYC' });
   }
-};
+}
+
+export default new KYCController();

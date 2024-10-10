@@ -1,17 +1,10 @@
-
-export interface UserKYCData {
-    firstName: string;
-    lastName: string;
-    dateOfBirth: string;  // Format: YYYY-MM-DD
-    idType: string;  // e.g., 'passport', 'driver_license'
-    idNumber: string;
-    address: string;
-    country: string;
-  }
-  
-  export interface KYCResponse {
-    status: string;  // e.g., 'success', 'failed'
-    message: string;
-    verificationId: string;
-    verificationStatus: string;  // e.g., 'approved', 'pending', 'rejected'
-  }
+// kycData.ts
+export interface KYCData {
+  governmentId: {
+    type: 'passport' | 'national_id' | 'voters_card' | 'drivers_license' | 'residential_card';
+    frontImage: string; // URL or path to the front image of the government ID
+    backImage: string; // URL or path to the back image of the government ID
+  };
+  citizenship: string; // The country the user is from
+  selfie: string; // URL or path to the selfie for face recognition
+}

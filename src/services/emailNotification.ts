@@ -4,11 +4,13 @@ import nodemailer from 'nodemailer';
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT!, 10),
-  secure: false, // Use true if you're using port 465
+  secure: true, // Use true if you're using port 465
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  logger: true, // Enable this for detailed logs
+  debug: true,  // Enable this for detailed debugging outpu
   tls: {
     rejectUnauthorized: false, // Set to true if using self-signed certificates
   },

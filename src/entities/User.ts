@@ -15,6 +15,16 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
+  @Column({ unique: true })
+  gender!: string;
+
+  @Column({ unique: true })
+  fullName!: string;
+
+  @Column({ nullable: true })
+  transactionPin?: string; 
+
+
   @Column()
   password!: string;
 
@@ -23,6 +33,13 @@ export class User {
 
   @Column({ nullable: true })
   appleId?: string;
+
+  @Column({ type: 'varchar', nullable: true }) // Nullable because it will only be used temporarily
+  otp?: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  otpExpiry: Date | null;
+
 
   @Column({ nullable: true })
   phoneNumber?: string;

@@ -5,8 +5,8 @@ import authRoutes from './routes/authRoutes';
 import walletRoutes from './routes/walletRoutes';
 import profileRoutes from './routes/profileRoutes';
 import { AppDataSource } from './database'; // Database connection
-import pg from 'pg'; // PostgreSQL client
-import pgSession from 'connect-pg-simple'; // PostgreSQL session store
+import pg from 'pg'; 
+import pgSession from 'connect-pg-simple'; 
 import "reflect-metadata";
 
 
@@ -24,6 +24,7 @@ const pgPool = new Pool({
 // Configure session middleware using PostgreSQL
 const PgSessionStore = pgSession(session);
 
+
 // Use JSON middleware
 app.use(express.json());
 
@@ -31,16 +32,16 @@ app.use(express.json());
 app.use(
   session({
     store: new PgSessionStore({
-      pool: pgPool, // Connect to PostgreSQL pool
-      tableName: 'session', // This is the default table name; change if needed
+      pool: pgPool, 
+      tableName: 'session', 
     }),
     secret: process.env.SESSION_SECRET || 'fallback_secret_key', // Use a secret key from .env
-    resave: false, // Do not save sessions if they are not modified
-    saveUninitialized: false, // Do not save uninitialized sessions
+    resave: false, 
+    saveUninitialized: false, 
     cookie: {
-      secure: process.env.NODE_ENV === 'production', // Set to true if using HTTPS
-      maxAge: 1000 * 60 * 60 * 24, // Cookie expiration: 24 hours
-      httpOnly: true, // For security; makes cookies inaccessible to JavaScript
+      secure: process.env.NODE_ENV === 'development', // Set to true if using HTTPS
+      maxAge: 1000 * 60 * 60 * 24,
+      httpOnly: true, 
     },
   })
 );

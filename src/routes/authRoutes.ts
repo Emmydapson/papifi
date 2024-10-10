@@ -1,7 +1,8 @@
 // src/routes/authRoutes.ts
 import { Router } from 'express';
-import { registerUser,  verifyOtp, loginUser } from '../controllers/authController';
-import { resendOtp } from '../controllers/authController';
+import { registerUser, resendOtp, verifyOtp, loginUser, createTransactionPin } from '../controllers/authController';
+import KYCController from '../controllers/kycControllers';
+
 
 const router = Router();
 
@@ -9,5 +10,8 @@ router.post('/register', registerUser);  // New route
 router.post('/verify-otp', verifyOtp);
 router.post('/login', loginUser);
 router.post('/resend-otp', resendOtp);
+console.log('Resend OTP route hit');
+router.post('/kyc/verify', KYCController.verifyKYC)
+router.post('/create-pin',  createTransactionPin);
 
 export default router;
