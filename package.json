@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "clean": "tsc --build --clean",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js",
-     "heroku-postbuild": "npm run build"
+    "heroku-postbuild": "npm run build"
   },
   "keywords": [],
   "author": "",

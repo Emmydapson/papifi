@@ -15,10 +15,10 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
-  @Column({ unique: true })
+  @Column({ unique: false })
   gender!: string;
 
-  @Column({ unique: true })
+  @Column({ unique: false })
   fullName!: string;
 
   @Column({ nullable: true })

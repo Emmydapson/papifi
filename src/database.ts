@@ -1,6 +1,6 @@
 import 'dotenv/config'; // This will load the .env file
 import { DataSource } from 'typeorm';
-import { User } from './entities/User'; // Assuming you have a User entity
+import { User } from './entities/User'; 
 import { Wallet } from "./entities/Wallet";
 import { Profile } from "./entities/profile"
 

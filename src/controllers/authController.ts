@@ -10,12 +10,9 @@ import payshigaService from '../services/walletService';
 const OTP_EXPIRY_TIME = 5 * 60 * 1000; // OTP valid for 5 minutes (in milliseconds)
 
 export const registerUser = async (req: Request, res: Response) => {
-  const { fullName, email, password, gender, confirmPassword } = req.body;
+  const { fullName, email, password, gender, } = req.body;
 
-  // Check if passwords match
-  if (password !== confirmPassword) {
-    return res.status(400).json({ message: 'Passwords do not match. Please ensure both fields are identical.' });
-  }
+  
 
   const userRepository = AppDataSource.getRepository(User);
   const normalizedEmail = email.toLowerCase();
@@ -36,8 +33,10 @@ export const registerUser = async (req: Request, res: Response) => {
 
     // Create the user and save the OTP and expiry in the database
     const user = new User();
+    user.fullName = fullName;
     user.email = normalizedEmail;
     user.password = hashedPassword;
+    user.gender = gender; // Save gender in the user record
     user.otp = otp;  // Save OTP in the user record
     user.otpExpiry = otpExpiry;  // Save OTP expiry in the user record
     await userRepository.save(user);
@@ -48,6 +47,7 @@ export const registerUser = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
+
 
 export const verifyOtp = async (req: Request, res: Response) => {
   const { otp } = req.body;  // No email required

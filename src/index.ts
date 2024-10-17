@@ -46,6 +46,12 @@ app.use(
   })
 );
 
+// Define a route for the root path
+app.get('/', (req, res) => {
+  res.send('Welcome to the API!'); // You can customize this message
+});
+
+
 // Use routes after initializing session middleware
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
