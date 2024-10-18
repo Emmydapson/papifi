@@ -18,12 +18,11 @@ export class User {
   @Column({ unique: false })
   gender!: string;
 
-  @Column({ unique: false })
+  @Column({ name: 'fullname', nullable: false }) // Updated here
   fullName!: string;
 
   @Column({ nullable: true })
   transactionPin?: string; 
-
 
   @Column()
   password!: string;
@@ -39,7 +38,6 @@ export class User {
 
   @Column({ type: 'timestamp', nullable: true })
   otpExpiry: Date | null;
-
 
   @Column({ nullable: true })
   phoneNumber?: string;
