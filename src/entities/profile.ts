@@ -11,13 +11,13 @@ export class Profile {
   @JoinColumn()
   user: User;
 
-  @Column()
+  @Column({name: 'fullname'})
   fullName: string;
 
   @Column({ nullable: true })
   address: string;
 
-  @Column()
+  @Column({name: 'phonenumber'})
   phoneNumber: string;
 
   @Column()
