@@ -18,7 +18,7 @@ export class User {
   @Column({ unique: false })
   gender!: string;
 
-  @Column({ name: 'fullname', nullable: false }) // Updated here
+  @Column() // Updated here
   fullName!: string;
 
   @Column({ nullable: true })
