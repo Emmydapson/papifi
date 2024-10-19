@@ -51,40 +51,44 @@ export const registerUser = async (req: Request, res: Response) => {
 
 export const verifyOtp = async (req: Request, res: Response) => {
   const { otp } = req.body;
-  
+
   const userRepository = AppDataSource.getRepository(User);
-  
-  
   const user = await userRepository.findOne({ where: { id: req.user?.userId } });
 
-  
+  // Check if user exists
   if (!user) {
     return res.status(400).json({ message: 'User not found.' });
   }
 
-  
+  // Log current status of the user
+  console.log('User Verification Status:', user.isVerified);
+
+  // If account is already verified, return early
   if (user.isVerified) {
     return res.status(400).json({ message: 'Your account is already verified.' });
   }
 
-  
-  if (user.otp !== otp || (user.otpExpiry && new Date() > user.otpExpiry)) {
-    return res.status(400).json({ message: 'Invalid or expired OTP.' });
+  // Check if OTP matches and is not expired
+  if (user.otp !== otp) {
+    return res.status(400).json({ message: 'Invalid OTP.' });
+  }
+
+  if (user.otpExpiry && new Date() > user.otpExpiry) {
+    return res.status(400).json({ message: 'OTP has expired.' });
   }
 
   try {
-    
+    // Update user verification status and clear OTP fields
     user.isVerified = true;
     user.otp = null;
     user.otpExpiry = null;
     await userRepository.save(user);
 
-    
+    // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
       return res.status(500).json({ message: 'Internal server error.' });
     }
-
     const token = jwt.sign({ userId: user.id }, jwtSecret, { expiresIn: '1h' });
 
     res.status(200).json({ token, message: 'Account verified. Please create your transaction PIN.' });
@@ -93,6 +97,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });
   }
 };
+
 
 
 export const resendOtp = async (req: Request, res: Response) => {
