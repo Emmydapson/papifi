@@ -16,7 +16,7 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
     try {
         const decoded = jwt.verify(token, jwtSecret) as JwtPayload & { id: string, email: string };
         console.log('Decoded token for user:', decoded.email);
-        req.user = { id: decoded.id, email: decoded.email };
+        req.user = { id: decoded.id, email: decoded.email }; // Populate req.user
         next();
     } catch (error) {
         if (error instanceof TokenExpiredError) {

@@ -44,14 +44,15 @@ export const registerUser = async (req: Request, res: Response) => {
 };
 
 export const verifyOtp = async (req: Request, res: Response) => {
-  const { otp } = req.body;
+  const { otp } = req.body; // Only require OTP from the user
 
+  // Assuming req.user is populated by the authMiddleware
   const userRepository = AppDataSource.getRepository(User);
-  const user = await userRepository.findOne({ where: { email: req.body.email } });
+  const user = await userRepository.findOne({ where: { email: req.user?.email } }); // Use email from req.user
 
   // Check if user exists
   if (!user) {
-      console.error('Verification attempt for non-existent user:', req.body.email);
+      console.error('Verification attempt for non-existent user:', req.user?.email);
       return res.status(400).json({ message: 'User not found.' });
   }
 
@@ -94,6 +95,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });
   }
 };
+
 
 
 export const resendOtp = async (req: Request, res: Response) => {
