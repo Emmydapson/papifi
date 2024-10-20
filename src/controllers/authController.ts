@@ -60,8 +60,8 @@ export const verifyOtp = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'User not found.' });
   }
 
-  // Log current status of the user
-  console.log('User Verification Status:', user.isVerified);
+  // Log the current status and details of the user
+  console.log('Verifying user:', user.email, 'Verification status:', user.isVerified, 'OTP:', user.otp, 'OTP Expiry:', user.otpExpiry);
 
   // If account is already verified, return early
   if (user.isVerified) {
@@ -84,6 +84,8 @@ export const verifyOtp = async (req: Request, res: Response) => {
     user.otpExpiry = null;
     await userRepository.save(user);
 
+    console.log('User verified successfully:', user.email);
+
     // Generate JWT token
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
@@ -97,6 +99,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });
   }
 };
+
 
 
 
