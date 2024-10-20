@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt, { JwtPayload } from 'jsonwebtoken';
+import jwt, { JwtPayload, TokenExpiredError } from 'jsonwebtoken';
 
 export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
     const token = req.headers.authorization?.split(' ')[1];
@@ -19,6 +19,10 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
         req.user = { id: decoded.id, email: decoded.email };
         next();
     } catch (error) {
+        if (error instanceof TokenExpiredError) {
+            console.error('Token expired:', error);
+            return res.status(401).json({ message: 'Token has expired. Please log in again.' });
+        }
         console.error('Invalid token:', error);
         return res.status(401).json({ message: 'Invalid token' });
     }

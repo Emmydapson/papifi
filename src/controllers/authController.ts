@@ -47,11 +47,11 @@ export const verifyOtp = async (req: Request, res: Response) => {
   const { otp } = req.body;
 
   const userRepository = AppDataSource.getRepository(User);
-  const user = await userRepository.findOne({ where: { email: req.user?.email } });
+  const user = await userRepository.findOne({ where: { email: req.body.email } });
 
   // Check if user exists
   if (!user) {
-      console.error('Verification attempt for non-existent user:', req.user?.email);
+      console.error('Verification attempt for non-existent user:', req.body.email);
       return res.status(400).json({ message: 'User not found.' });
   }
 
