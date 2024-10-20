@@ -6,8 +6,9 @@ import jwt from 'jsonwebtoken';
 import { sendOTPEmail } from '../services/emailNotification';
 import payshigaService from '../services/walletService';
 
-const OTP_EXPIRY_TIME = 5 * 60 * 1000; 
+const OTP_EXPIRY_TIME = 5 * 60 * 1000; // 5 minutes
 
+// User Registration
 export const registerUser = async (req: Request, res: Response) => {
   const { fullName, email, password, gender } = req.body;
 
@@ -43,34 +44,29 @@ export const registerUser = async (req: Request, res: Response) => {
   }
 };
 
+// OTP Verification
 export const verifyOtp = async (req: Request, res: Response) => {
-  const { otp } = req.body; // Only require OTP from the user
+  const { otp, email } = req.body; // Now expecting email and otp from the request
 
-  // Assuming req.user is populated by the authMiddleware
   const userRepository = AppDataSource.getRepository(User);
-  const user = await userRepository.findOne({ where: { email: req.user?.email } }); // Use email from req.user
-
+  const normalizedEmail = email.toLowerCase();  // Normalize email
+  
+  const user = await userRepository.findOne({ where: { email: normalizedEmail } });  // Find user by email
+  
   // Check if user exists
   if (!user) {
-      console.error('Verification attempt for non-existent user:', req.user?.email);
+      console.error('Verification attempt for non-existent user:', normalizedEmail);
       return res.status(400).json({ message: 'User not found.' });
-  }
-
-  console.log('Verifying user:', user.email, 'Verification status:', user.isVerified);
-
-  // If account is already verified, return early
-  if (user.isVerified) {
-      return res.status(400).json({ message: 'Your account is already verified.' });
   }
 
   // Check if OTP matches and is not expired
   if (user.otp !== otp) {
-      console.error(`Invalid OTP provided for user ${user.email}. Expected: ${user.otp}, Provided: ${otp}`);
+      console.error(`Invalid OTP for user ${normalizedEmail}. Expected: ${user.otp}, Provided: ${otp}`);
       return res.status(400).json({ message: 'Invalid OTP.' });
   }
 
   if (user.otpExpiry && new Date() > user.otpExpiry) {
-      console.error(`OTP expired for user ${user.email}. Current time: ${new Date()}, OTP expiry: ${user.otpExpiry}`);
+      console.error(`OTP expired for user ${normalizedEmail}. Current time: ${new Date()}, OTP expiry: ${user.otpExpiry}`);
       return res.status(400).json({ message: 'OTP has expired.' });
   }
 
@@ -81,8 +77,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       user.otpExpiry = null;
       await userRepository.save(user);
 
-      console.log('User verified successfully:', user.email);
-
+      // Generate JWT after verification
       const jwtSecret = process.env.JWT_SECRET;
       if (!jwtSecret) {
           return res.status(500).json({ message: 'Internal server error.' });
@@ -96,8 +91,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
   }
 };
 
-
-
+// Resend OTP
 export const resendOtp = async (req: Request, res: Response) => {
   const { email } = req.body;
 
@@ -130,15 +124,17 @@ export const resendOtp = async (req: Request, res: Response) => {
   }
 };
 
+// Create Transaction PIN
 export const createTransactionPin = async (req: Request, res: Response) => {
-  const { pin } = req.body;
+  const { pin, email } = req.body; // Assuming email is sent with the request
 
   if (!pin || pin.length !== 4) {
     return res.status(400).json({ message: 'PIN must be a 4-digit number.' });
   }
 
   const userRepository = AppDataSource.getRepository(User);
-  const user = await userRepository.findOne({ where: { email: req.user?.email } }); // Use email to find user
+  const normalizedEmail = email.toLowerCase(); // Normalize email
+  const user = await userRepository.findOne({ where: { email: normalizedEmail } });
 
   if (!user) {
     return res.status(404).json({ message: 'User not found.' });
@@ -159,6 +155,7 @@ export const createTransactionPin = async (req: Request, res: Response) => {
   }
 };
 
+// Login
 export const loginUser = async (req: Request, res: Response) => {
   const { email, password } = req.body;
 
