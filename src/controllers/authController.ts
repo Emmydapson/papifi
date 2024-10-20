@@ -16,7 +16,7 @@ export const registerUser = async (req: Request, res: Response) => {
 
   const existingUser = await userRepository.findOne({ where: { email: normalizedEmail } });
   if (existingUser) {
-    return res.status(400).json({ message: 'User already exists. Please use a different email address.' });
+      return res.status(400).json({ message: 'User already exists. Please use a different email address.' });
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -24,22 +24,22 @@ export const registerUser = async (req: Request, res: Response) => {
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
-    await sendOTPEmail(normalizedEmail, otp);
+      await sendOTPEmail(normalizedEmail, otp);
 
-    const user = new User();
-    user.fullName = fullName;
-    user.email = normalizedEmail;
-    user.password = hashedPassword;
-    user.gender = gender;
-    user.otp = otp;
-    user.otpExpiry = otpExpiry;
-    user.isVerified = false; 
-    await userRepository.save(user);
+      const user = new User();
+      user.fullName = fullName;
+      user.email = normalizedEmail;
+      user.password = hashedPassword;
+      user.gender = gender;
+      user.otp = otp;
+      user.otpExpiry = otpExpiry;
+      user.isVerified = false; 
+      await userRepository.save(user);
 
-    res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
+      res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
   } catch (error) {
-    console.error('Failed to send OTP:', error);
-    return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
+      console.error('Failed to send OTP:', error);
+      return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
 
@@ -47,51 +47,54 @@ export const verifyOtp = async (req: Request, res: Response) => {
   const { otp } = req.body;
 
   const userRepository = AppDataSource.getRepository(User);
-  const user = await userRepository.findOne({ where: { email: req.user?.email } }); // Use email to find user
+  const user = await userRepository.findOne({ where: { email: req.user?.email } });
 
   // Check if user exists
   if (!user) {
-    return res.status(400).json({ message: 'User not found.' });
+      console.error('Verification attempt for non-existent user:', req.user?.email);
+      return res.status(400).json({ message: 'User not found.' });
   }
 
-  console.log('Verifying user:', user.email, 'Verification status:', user.isVerified, 'OTP:', user.otp, 'OTP Expiry:', user.otpExpiry);
+  console.log('Verifying user:', user.email, 'Verification status:', user.isVerified);
 
   // If account is already verified, return early
   if (user.isVerified) {
-    return res.status(400).json({ message: 'Your account is already verified.' });
+      return res.status(400).json({ message: 'Your account is already verified.' });
   }
 
   // Check if OTP matches and is not expired
   if (user.otp !== otp) {
-    return res.status(400).json({ message: 'Invalid OTP.' });
+      console.error(`Invalid OTP provided for user ${user.email}. Expected: ${user.otp}, Provided: ${otp}`);
+      return res.status(400).json({ message: 'Invalid OTP.' });
   }
 
   if (user.otpExpiry && new Date() > user.otpExpiry) {
-    return res.status(400).json({ message: 'OTP has expired.' });
+      console.error(`OTP expired for user ${user.email}. Current time: ${new Date()}, OTP expiry: ${user.otpExpiry}`);
+      return res.status(400).json({ message: 'OTP has expired.' });
   }
 
   try {
-    // Update user verification status and clear OTP fields
-    user.isVerified = true;
-    user.otp = null;
-    user.otpExpiry = null;
-    await userRepository.save(user);
+      // Update user verification status and clear OTP fields
+      user.isVerified = true;
+      user.otp = null;
+      user.otpExpiry = null;
+      await userRepository.save(user);
 
-    console.log('User verified successfully:', user.email);
+      console.log('User verified successfully:', user.email);
 
-    // Generate JWT token including id and email
-    const jwtSecret = process.env.JWT_SECRET;
-    if (!jwtSecret) {
-      return res.status(500).json({ message: 'Internal server error.' });
-    }
-    const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
+      const jwtSecret = process.env.JWT_SECRET;
+      if (!jwtSecret) {
+          return res.status(500).json({ message: 'Internal server error.' });
+      }
+      const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
 
-    res.status(200).json({ token, message: 'Account verified. Please create your transaction PIN.' });
+      res.status(200).json({ token, message: 'Account verified. Please create your transaction PIN.' });
   } catch (error) {
-    console.error('Failed to verify OTP:', error);
-    return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });
+      console.error('Failed to verify OTP:', error);
+      return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });
   }
 };
+
 
 export const resendOtp = async (req: Request, res: Response) => {
   const { email } = req.body;
@@ -162,16 +165,18 @@ export const loginUser = async (req: Request, res: Response) => {
   const user = await userRepository.findOne({ where: { email: normalizedEmail } });
 
   if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(400).json({ message: 'Invalid credentials. Please check your email and password and try again.' });
+      console.error('Invalid login attempt:', { email: normalizedEmail, valid: user !== null });
+      return res.status(400).json({ message: 'Invalid credentials. Please check your email and password and try again.' });
   }
 
   if (!user.isVerified) {
-    return res.status(400).json({ message: 'Your account is not verified. Please verify your account to log in.' });
+      console.error('User not verified:', user.email);
+      return res.status(400).json({ message: 'Your account is not verified. Please verify your account to log in.' });
   }
 
   const jwtSecret = process.env.JWT_SECRET;
   if (!jwtSecret) {
-    return res.status(500).json({ message: 'Internal server error: JWT_SECRET is not defined in environment variables.' });
+      return res.status(500).json({ message: 'Internal server error: JWT_SECRET is not defined in environment variables.' });
   }
 
   const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
