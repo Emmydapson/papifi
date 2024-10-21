@@ -125,16 +125,17 @@ export const resendOtp = async (req: Request, res: Response) => {
   }
 };
 
+
 // Create Transaction PIN
 export const createTransactionPin = async (req: Request, res: Response) => {
-  const { pin, email } = req.body; // Assuming email is sent with the request
+  const { pin, email } = req.body; 
 
   if (!pin || pin.length !== 4) {
     return res.status(400).json({ message: 'PIN must be a 4-digit number.' });
   }
 
   const userRepository = AppDataSource.getRepository(User);
-  const normalizedEmail = email.toLowerCase(); // Normalize email
+  const normalizedEmail = email.toLowerCase(); 
   const user = await userRepository.findOne({ where: { email: normalizedEmail } });
 
   if (!user) {
@@ -145,16 +146,9 @@ export const createTransactionPin = async (req: Request, res: Response) => {
   user.transactionPin = hashedPin;
   await userRepository.save(user);
 
-  try {
-    await payshigaService.createWallet(user.id, 'NGN');
-    await payshigaService.createWallet(user.id, 'USD');
-    await payshigaService.createWallet(user.id, 'GBP');
-
-    return res.status(200).json({ message: 'Transaction PIN created and wallets set up successfully.' });
-  } catch (error) {
-    return res.status(500).json({ message: 'Error creating wallets. Please try again later.' });
-  }
+  return res.status(200).json({ message: 'Transaction PIN set successfully.' });
 };
+
 
 // Login
 export const loginUser = async (req: Request, res: Response) => {
