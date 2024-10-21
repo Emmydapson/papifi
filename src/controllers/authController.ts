@@ -76,6 +76,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       user.otp = null;
       user.otpExpiry = null;
       await userRepository.save(user);
+      
 
       // Generate JWT after verification
       const jwtSecret = process.env.JWT_SECRET;

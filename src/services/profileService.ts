@@ -1,81 +1,73 @@
-// src/services/profileService.ts
 import { AppDataSource } from '../database';
 import { Profile } from '../entities/profile';
 import { User } from '../entities/User';
 import bcrypt from 'bcryptjs';
 import { sendPasswordChangeNotification } from '../services/emailNotification';
 
-
-export const createProfile = async (userId: string, profileData: Partial<Profile>) => {
+// Get the user profile by userId
+export const getProfile = async (userId: string) => {
   const profileRepository = AppDataSource.getRepository(Profile);
-  const userRepository = AppDataSource.getRepository(User);
 
+  // Find the profile associated with the userId
+  const profile = await profileRepository.findOne({ where: { user: { id: userId } } });
+
+  if (!profile) {
+    throw new Error('Profile not found');
+  }
+
+  return profile;
+};
+
+// Update the user profile
+export const updateProfile = async (userId: string, profileData: Partial<Profile>) => {
+  const profileRepository = AppDataSource.getRepository(Profile);
+
+  // Fetch the profile associated with the userId
+  const profile = await profileRepository.findOne({ where: { user: { id: userId } } });
+
+  if (!profile) {
+    throw new Error('Profile not found');
+  }
+
+  // Prevent updates to email and fullName (as these should not be changed)
+  if (profileData.email || profileData.fullName) {
+    throw new Error('Cannot update email or fullName');
+  }
+
+  // Update the profile with any provided profileData
+  Object.assign(profile, profileData);
+
+  // Save the updated profile
+  await profileRepository.save(profile);
+
+  return profile;
+};
+
+// Update user password
+export const updatePassword = async (userId: string, currentPassword: string, newPassword: string) => {
+  const userRepository = AppDataSource.getRepository(User);
+  
+  // Fetch the user based on userId
   const user = await userRepository.findOne({ where: { id: userId } });
   if (!user) {
     throw new Error('User not found');
   }
 
-  const profile = profileRepository.create({
-    user,
-    ...profileData,
-  });
-
-  await profileRepository.save(profile);
-
-  return profile;
-};
-
-export const updateProfile = async (userId: string, profileData: Partial<Profile>) => {
-  const profileRepository = AppDataSource.getRepository(Profile);
-
-  const profile = await profileRepository.findOne({ where: { user: { id: userId } } });
-
-  if (!profile) {
-    throw new Error('Profile not found');
+  // Check if the current password matches
+  const isPasswordMatch = await bcrypt.compare(currentPassword, user.password);
+  if (!isPasswordMatch) {
+    return false; // Invalid current password
   }
 
-  Object.assign(profile, profileData);
+  // Hash the new password
+  const hashedNewPassword = await bcrypt.hash(newPassword, 10);
 
-  await profileRepository.save(profile);
+  // Update the user's password and save it
+  user.password = hashedNewPassword;
+  await userRepository.save(user);
 
-  return profile;
-};
-
-export const getProfile = async (userId: string) => {
-  const profileRepository = AppDataSource.getRepository(Profile);
-
-  const profile = await profileRepository.findOne({ where: { user: { id: userId } } });
-  
-  if (!profile) {
-    throw new Error('Profile not found');
-  }
-
-  return profile;
-};
-
-export const updatePassword = async (userId: string, currentPassword: string, newPassword: string) => {
-    const userRepository = AppDataSource.getRepository(User);
-    
-    const user = await userRepository.findOne({ where: { id: userId } });
-    if (!user) {
-      throw new Error('User not found');
-    }
-  
-    // Check if the current password is correct
-    const isPasswordMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isPasswordMatch) {
-      return false; // Invalid current password
-    }
-  
-    // Hash the new password
-    const hashedNewPassword = await bcrypt.hash(newPassword, 10);
-  
-    // Update the user's password
-    user.password = hashedNewPassword;
-    await userRepository.save(user);
-  
-    // Send email notification
+  // Send an email notification to the user
   await sendPasswordChangeNotification(user.email);
 
-    return true;
-  };
+  return true;
+};

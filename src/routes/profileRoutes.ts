@@ -1,13 +1,13 @@
 // src/routes/profileRoutes.ts
 import { Router } from 'express';
-import { createUserProfile, getUserProfile, updateUserProfile } from '../controllers/profileController';
+import {  getUserProfile, updateUserProfile } from '../controllers/profileController';
 import { authMiddleware } from '../middlewares/authMiddleware';
 import { changePassword } from '../controllers/profileController';
 import { submitSupportRequest } from '../controllers/profileController';
 
 const router = Router();
 
-router.post('/', authMiddleware, createUserProfile);
+
 router.get('/', authMiddleware, getUserProfile);
 router.put('/', authMiddleware, updateUserProfile);
 router.put('/change-password', authMiddleware, changePassword);
