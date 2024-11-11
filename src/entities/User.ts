@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   OneToMany,
+  BeforeInsert,
 } from 'typeorm';
 import { Wallet } from './Wallet';
 
@@ -12,17 +13,23 @@ export class User {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
+  @Column()
+  firstName!: string;
+
+  @Column()
+  lastName!: string;
+
   @Column({ unique: true })
   email!: string;
+
+  @Column({ unique: true }) // Ensure phone number is unique
+  phoneNumber!: string;
 
   @Column({ unique: false })
   gender!: string;
 
-  @Column() // Updated here
-  fullName!: string;
-
   @Column({ nullable: true })
-  transactionPin?: string; 
+  transactionPin?: string;
 
   @Column()
   password!: string;
@@ -33,14 +40,11 @@ export class User {
   @Column({ nullable: true })
   appleId?: string;
 
-  @Column({ type: 'varchar', nullable: true }) // Nullable because it will only be used temporarily
+  @Column({ type: 'varchar', nullable: true })
   otp?: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
   otpExpiry: Date | null;
-
-  @Column({ nullable: true })
-  phoneNumber?: string;
 
   @Column({ default: false })
   isVerified!: boolean;
@@ -48,10 +52,20 @@ export class User {
   @CreateDateColumn()
   createdAt!: Date;
 
-  // Add a one-to-many relation to wallets
   @OneToMany(() => Wallet, (wallet) => wallet.user)
-  wallets!: Wallet[];  // A user can have multiple wallets
+  wallets!: Wallet[];
 
   @Column({ default: false })
   isKYCVerified!: boolean;
+
+  // Phone number validation to ensure country code
+  @BeforeInsert()
+  validatePhoneNumber() {
+    const phonePattern = /^\+[1-9]\d{1,14}$/; // Validates phone number with country code
+    if (!phonePattern.test(this.phoneNumber)) {
+      throw new Error(
+        'Phone number must include a valid country code (e.g., +123456789).'
+      );
+    }
+  }
 }

@@ -29,12 +29,12 @@ export const updateProfile = async (userId: string, profileData: Partial<Profile
     throw new Error('Profile not found');
   }
 
-  // Prevent updates to email and fullName (as these should not be changed)
-  if (profileData.email || profileData.fullName) {
-    throw new Error('Cannot update email or fullName');
+  // Prevent updates to email, firstName, and lastName (these should not be changed)
+  if (profileData.email || profileData.firstName || profileData.lastName) {
+    throw new Error('Cannot update email, firstName, or lastName');
   }
 
-  // Update the profile with any provided profileData
+  // Update the profile with any provided profileData for mutable fields
   Object.assign(profile, profileData);
 
   // Save the updated profile

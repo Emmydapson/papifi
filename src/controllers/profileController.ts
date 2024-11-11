@@ -1,9 +1,10 @@
 // src/controllers/profileController.ts
 import { Request, Response } from 'express';
-import {  getProfile, updateProfile } from '../services/profileService';
+import { getProfile, updateProfile } from '../services/profileService';
 import { JwtPayload } from 'jsonwebtoken';
 import { updatePassword } from '../services/profileService';
 import { createSupportTicket } from '../services/zendeskService';
+import { parseCountryFromPhoneNumber } from '../utils/countryUtils';
 
 export const getUserProfile = async (req: Request, res: Response) => {
   if (!req.user) {
@@ -23,24 +24,36 @@ export const getUserProfile = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Profile not found' });
     }
 
-    // Filter out fields that aren't updated yet (such as country, nationality)
-    const { fullName, email, gender, phoneNumber, country, nationality, dateOfBirth, address } = profile;
+    // Extract profile fields for response
+    const {
+      firstName,
+      lastName,
+      email,
+      gender,
+      phoneNumber,
+      nationality,
+      dateOfBirth,
+      address,
+    } = profile;
 
-    res.status(200).json({ 
-      fullName, 
-      email, 
-      gender, 
-      phoneNumber: phoneNumber || null, // Optional fields default to null
-      country: country || null, 
-      nationality: nationality || null, 
-      dateOfBirth: dateOfBirth || null, 
-      address: address || null
+    // Infer country from the phone number's country code
+    const country = phoneNumber ? parseCountryFromPhoneNumber(phoneNumber) : null;
+
+    res.status(200).json({
+      firstName,
+      lastName,
+      email,
+      gender,
+      phoneNumber: phoneNumber || null,
+      country,
+      nationality: nationality || null,
+      dateOfBirth: dateOfBirth || null,
+      address: address || null,
     });
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
   }
 };
-
 
 export const updateUserProfile = async (req: Request, res: Response) => {
   if (!req.user) {
@@ -53,19 +66,23 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'User ID not found in token' });
   }
 
-  const { address, phoneNumber, country, nationality, dateOfBirth } = req.body;
+  const { address, phoneNumber, nationality, dateOfBirth } = req.body;
 
-  // Disallow updating 'fullName' and 'email'
-  if (req.body.fullName || req.body.email) {
-    return res.status(400).json({ message: 'Cannot update fullName or email' });
+  // Disallow updating 'firstName', 'lastName', and 'email'
+  if (req.body.firstName || req.body.lastName || req.body.email) {
+    return res.status(400).json({ message: 'Cannot update firstName, lastName, or email' });
   }
 
-  // Prepare the update object, filtering out undefined values
-  const updateFields: Partial<{ address: string; phoneNumber: string; country: string; nationality: string; dateOfBirth: string }> = {};
+  // Prepare update object
+  const updateFields: Partial<{
+    address: string;
+    phoneNumber: string;
+    nationality: string;
+    dateOfBirth: string;
+  }> = {};
 
   if (address) updateFields.address = address;
   if (phoneNumber) updateFields.phoneNumber = phoneNumber;
-  if (country) updateFields.country = country;
   if (nationality) updateFields.nationality = nationality;
   if (dateOfBirth) updateFields.dateOfBirth = dateOfBirth;
 
@@ -76,8 +93,6 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     res.status(500).json({ message: (error as Error).message });
   }
 };
-
-
 
 
 export const changePassword = async (req: Request, res: Response) => {

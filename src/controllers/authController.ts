@@ -8,16 +8,17 @@ import payshigaService from '../services/walletService';
 
 const OTP_EXPIRY_TIME = 5 * 60 * 1000; // 5 minutes
 
+
 // User Registration
 export const registerUser = async (req: Request, res: Response) => {
-  const { fullName, email, password, gender } = req.body;
+  const { firstName, lastName, email, password, gender, phoneNumber } = req.body;
 
   const userRepository = AppDataSource.getRepository(User);
   const normalizedEmail = email.toLowerCase();
 
-  const existingUser = await userRepository.findOne({ where: { email: normalizedEmail } });
+  const existingUser = await userRepository.findOne({ where: [{ email: normalizedEmail }, { phoneNumber }] });
   if (existingUser) {
-      return res.status(400).json({ message: 'User already exists. Please use a different email address.' });
+    return res.status(400).json({ message: 'User already exists with this email or phone number.' });
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
@@ -25,24 +26,27 @@ export const registerUser = async (req: Request, res: Response) => {
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
-      await sendOTPEmail(normalizedEmail, otp);
+    await sendOTPEmail(normalizedEmail, otp);
 
-      const user = new User();
-      user.fullName = fullName;
-      user.email = normalizedEmail;
-      user.password = hashedPassword;
-      user.gender = gender;
-      user.otp = otp;
-      user.otpExpiry = otpExpiry;
-      user.isVerified = false; 
-      await userRepository.save(user);
+    const user = new User();
+    user.firstName = firstName;
+    user.lastName = lastName;
+    user.email = normalizedEmail;
+    user.password = hashedPassword;
+    user.gender = gender;
+    user.phoneNumber = phoneNumber;
+    user.otp = otp;
+    user.otpExpiry = otpExpiry;
+    user.isVerified = false;
+    await userRepository.save(user);
 
-      res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
+    res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
   } catch (error) {
-      console.error('Failed to send OTP:', error);
-      return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
+    console.error('Failed to send OTP:', error);
+    return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
+
 
 // OTP Verification
 export const verifyOtp = async (req: Request, res: Response) => {

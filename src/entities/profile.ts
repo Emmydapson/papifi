@@ -11,25 +11,28 @@ export class Profile {
   user: User;
 
   @Column()
-  fullName: string;  // Remains immutable from registration
+  firstName: string;  // Captured from registration, immutable
+
+  @Column()
+  lastName: string;   // Captured from registration, immutable
 
   @Column({ unique: true })
-  email: string;  // Added to store email permanently
+  email: string;      // Stored permanently
 
   @Column({ nullable: true })
-  address: string;  // Optional field
+  address: string;    // Optional field
 
   @Column({ nullable: true })
   phoneNumber: string;  // Optional, as it's not mandatory in registration
 
   @Column({ nullable: true })
-  country: string;  // Optional, can be updated later
+  country: string;    // Optional, can be updated later
 
   @Column({ type: 'date', nullable: true })
   dateOfBirth: string;  // Optional, can be updated later
 
   @Column()
-  gender: string;  // Captured from registration, immutable
+  gender: string;     // Captured from registration, immutable
 
   @Column({ nullable: true })
   nationality: string;  // Optional, can be updated later
