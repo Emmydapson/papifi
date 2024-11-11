@@ -7,6 +7,7 @@ import { sendOTPEmail } from '../services/emailNotification';
 import payshigaService from '../services/walletService';
 
 const OTP_EXPIRY_TIME = 5 * 60 * 1000; // 5 minutes
+const RESET_OTP_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
 
 
 // User Registration
@@ -180,4 +181,64 @@ export const loginUser = async (req: Request, res: Response) => {
   const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
 
   res.status(200).json({ token, message: 'Login successful. Welcome back!' });
+};
+
+// Request Password Reset
+export const requestPasswordReset = async (req: Request, res: Response) => {
+  const { email } = req.body;
+  const userRepository = AppDataSource.getRepository(User);
+  const normalizedEmail = email.toLowerCase();
+
+  const user = await userRepository.findOne({ where: { email: normalizedEmail } });
+  if (!user) {
+    return res.status(400).json({ message: 'No account found with this email address.' });
+  }
+
+  // Generate OTP for password reset
+  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpExpiry = new Date(Date.now() + RESET_OTP_EXPIRY_TIME);
+
+  try {
+    await sendOTPEmail(normalizedEmail, otp);
+
+    // Save OTP and expiry to user record
+    user.otp = otp;
+    user.otpExpiry = otpExpiry;
+    await userRepository.save(user);
+
+    res.status(200).json({ message: 'Password reset OTP has been sent to your email.' });
+  } catch (error) {
+    console.error('Failed to send password reset OTP:', error);
+    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
+  }
+};
+
+// Reset Password
+export const resetPassword = async (req: Request, res: Response) => {
+  const { email, otp, newPassword } = req.body;
+  const userRepository = AppDataSource.getRepository(User);
+  const normalizedEmail = email.toLowerCase();
+
+  const user = await userRepository.findOne({ where: { email: normalizedEmail } });
+  if (!user) {
+    return res.status(400).json({ message: 'No account found with this email address.' });
+  }
+
+  // Verify OTP
+  if (user.otp !== otp) {
+    return res.status(400).json({ message: 'Invalid OTP.' });
+  }
+
+  if (user.otpExpiry && new Date() > user.otpExpiry) {
+    return res.status(400).json({ message: 'OTP has expired.' });
+  }
+
+  // Hash new password and update the user record
+  const hashedPassword = await bcrypt.hash(newPassword, 10);
+  user.password = hashedPassword;
+  user.otp = null;
+  user.otpExpiry = null;
+  await userRepository.save(user);
+
+  res.status(200).json({ message: 'Password reset successful. You can now log in with your new password.' });
 };
