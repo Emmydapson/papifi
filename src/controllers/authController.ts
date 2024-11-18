@@ -27,7 +27,9 @@ export const registerUser = async (req: Request, res: Response) => {
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
+    console.log(`Attempting to send OTP to ${normalizedEmail}`);
     await sendOTPEmail(normalizedEmail, otp);
+    console.log(`OTP successfully sent to ${normalizedEmail}`);
 
     const user = new User();
     user.firstName = firstName;
@@ -39,11 +41,18 @@ export const registerUser = async (req: Request, res: Response) => {
     user.otp = otp;
     user.otpExpiry = otpExpiry;
     user.isVerified = false;
-    await userRepository.save(user);
 
-    res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
+    try {
+      await userRepository.save(user);
+      console.log(`User saved successfully: ${normalizedEmail}`);
+      res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
+    } catch (error) {
+      console.error('Error occurred while saving user:', error);
+      return res.status(500).json({ message: 'An error occurred while saving the user. Please try again later.' });
+    }
+
   } catch (error) {
-    console.error('Failed to send OTP:', error);
+    console.error('Error occurred during OTP sending:', error);
     return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
@@ -81,7 +90,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       user.otp = null;
       user.otpExpiry = null;
       await userRepository.save(user);
-      
+      console.log(`User ${normalizedEmail} successfully verified.`);
 
       // Generate JWT after verification
       const jwtSecret = process.env.JWT_SECRET;
@@ -117,19 +126,21 @@ export const resendOtp = async (req: Request, res: Response) => {
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
+    console.log(`Attempting to resend OTP to ${normalizedEmail}`);
     await sendOTPEmail(normalizedEmail, newOtp);
+    console.log(`OTP successfully resent to ${normalizedEmail}`);
 
     user.otp = newOtp;
     user.otpExpiry = otpExpiry;
     await userRepository.save(user);
+    console.log(`User ${normalizedEmail} updated with new OTP`);
 
     res.status(200).json({ message: 'A new OTP has been sent to your email. Please check and verify.' });
   } catch (error) {
-    console.error('Failed to send new OTP:', error);
+    console.error('Failed to resend OTP:', error);
     return res.status(500).json({ message: 'An error occurred while sending the new OTP. Please try again later.' });
   }
 };
-
 
 // Create Transaction PIN
 export const createTransactionPin = async (req: Request, res: Response) => {
@@ -153,7 +164,6 @@ export const createTransactionPin = async (req: Request, res: Response) => {
 
   return res.status(200).json({ message: 'Transaction PIN set successfully.' });
 };
-
 
 // Login
 export const loginUser = async (req: Request, res: Response) => {
@@ -199,17 +209,19 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
   const otpExpiry = new Date(Date.now() + RESET_OTP_EXPIRY_TIME);
 
   try {
+    console.log(`Attempting to send password reset OTP to ${normalizedEmail}`);
     await sendOTPEmail(normalizedEmail, otp);
+    console.log(`Password reset OTP successfully sent to ${normalizedEmail}`);
 
     // Save OTP and expiry to user record
     user.otp = otp;
     user.otpExpiry = otpExpiry;
     await userRepository.save(user);
 
-    res.status(200).json({ message: 'Password reset OTP has been sent to your email.' });
+    res.status(200).json({ message: 'A password reset OTP has been sent to your email.' });
   } catch (error) {
     console.error('Failed to send password reset OTP:', error);
-    return res.status(500).json({ message: 'An error occurred. Please try again later.' });
+    return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
 
