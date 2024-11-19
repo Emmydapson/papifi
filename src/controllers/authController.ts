@@ -254,3 +254,53 @@ export const resetPassword = async (req: Request, res: Response) => {
 
   res.status(200).json({ message: 'Password reset successful. You can now log in with your new password.' });
 };
+
+export const makeAdmin = async (req: Request, res: Response) => {
+  if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized. User not authenticated.' });
+  }
+
+  const { userId } = req.body;
+  const userRepository = AppDataSource.getRepository(User);
+
+  const user = await userRepository.findOne({ where: { id: userId } });
+  if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+  }
+
+  const requester = await userRepository.findOne({ where: { id: req.user.id } });
+  if (!requester || requester.role !== 'super_admin') {
+      return res.status(403).json({ message: 'Unauthorized. Only super admin can make changes.' });
+  }
+
+  user.role = 'admin';
+  await userRepository.save(user);
+  res.status(200).json({ message: 'User role updated to admin.' });
+};
+export const removeAdmin = async (req: Request, res: Response) => {
+  // Check if req.user is defined
+  if (!req.user) {
+    return res.status(401).json({ message: 'Unauthorized. User not authenticated.' });
+  }
+
+  const { userId } = req.body;
+  const userRepository = AppDataSource.getRepository(User);
+
+  // Check if the user exists in the database
+  const user = await userRepository.findOne({ where: { id: userId } });
+  if (!user) {
+    return res.status(404).json({ message: 'User not found.' });
+  }
+
+  // Check if the requester is a super admin
+  const requester = await userRepository.findOne({ where: { id: req.user.id } });
+  if (!requester || requester.role !== 'super_admin') {
+    return res.status(403).json({ message: 'Unauthorized. Only super admin can make changes.' });
+  }
+
+  // Remove admin rights
+  user.role = 'user';
+  await userRepository.save(user);
+
+  res.status(200).json({ message: 'Admin rights removed successfully.' });
+};

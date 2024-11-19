@@ -58,7 +58,13 @@ export class User {
   @Column({ default: false })
   isKYCVerified!: boolean;
 
-  // Phone number validation to ensure country code
+  @Column({
+    type: 'enum',
+    enum: ['user', 'admin', 'super_admin'],
+    default: 'user',
+  })
+  role!: 'user' | 'admin' | 'super_admin';
+
   @BeforeInsert()
   validatePhoneNumber() {
     const phonePattern = /^\+[1-9]\d{1,14}$/; // Validates phone number with country code

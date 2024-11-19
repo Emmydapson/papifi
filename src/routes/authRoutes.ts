@@ -7,8 +7,10 @@ import {
   loginUser,
   createTransactionPin,
   requestPasswordReset, // New import
-  resetPassword,        // New import
+  resetPassword,  
+  makeAdmin, removeAdmin       // New import
 } from '../controllers/authController';
+import {authMiddleware} from '../middlewares/authMiddleware';
 import KYCController from '../controllers/kycControllers';
 
 const router = Router();
@@ -20,6 +22,9 @@ router.post('/resend-otp', resendOtp);
 console.log('Resend OTP route hit');
 router.post('/kyc/verify', KYCController.verifyKYC);
 router.post('/create-pin', createTransactionPin);
+router.post('/make-admin', authMiddleware, makeAdmin); // Requires token
+router.post('/remove-admin', authMiddleware, removeAdmin);
+
 
 // New forgot password routes
 router.post('/forgot-password', requestPasswordReset); // Initiates password reset
