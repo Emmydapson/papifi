@@ -7,7 +7,7 @@ import {
   loginUser,
   createTransactionPin,
   requestPasswordReset, // New import
-  resetPassword,  
+  resetPassword,  verifyOtpForPasswordReset,
   makeAdmin, removeAdmin       // New import
 } from '../controllers/authController';
 import {authMiddleware} from '../middlewares/authMiddleware';
@@ -29,5 +29,6 @@ router.post('/remove-admin', authMiddleware, removeAdmin);
 // New forgot password routes
 router.post('/forgot-password', requestPasswordReset); // Initiates password reset
 router.post('/reset-password', resetPassword);         // Completes password reset
+router.post('/reset-passwordOtp', verifyOtpForPasswordReset)
 
 export default router;

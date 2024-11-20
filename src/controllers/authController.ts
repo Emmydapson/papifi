@@ -204,16 +204,12 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'No account found with this email address.' });
   }
 
-  // Generate OTP for password reset
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const otpExpiry = new Date(Date.now() + RESET_OTP_EXPIRY_TIME);
 
   try {
-    console.log(`Attempting to send password reset OTP to ${normalizedEmail}`);
     await sendOTPEmail(normalizedEmail, otp);
-    console.log(`Password reset OTP successfully sent to ${normalizedEmail}`);
 
-    // Save OTP and expiry to user record
     user.otp = otp;
     user.otpExpiry = otpExpiry;
     await userRepository.save(user);
@@ -225,9 +221,8 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
   }
 };
 
-// Reset Password
-export const resetPassword = async (req: Request, res: Response) => {
-  const { email, otp, newPassword } = req.body;
+export const verifyOtpForPasswordReset = async (req: Request, res: Response) => {
+  const { email, otp } = req.body;
   const userRepository = AppDataSource.getRepository(User);
   const normalizedEmail = email.toLowerCase();
 
@@ -236,7 +231,6 @@ export const resetPassword = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'No account found with this email address.' });
   }
 
-  // Verify OTP
   if (user.otp !== otp) {
     return res.status(400).json({ message: 'Invalid OTP.' });
   }
@@ -245,15 +239,38 @@ export const resetPassword = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'OTP has expired.' });
   }
 
-  // Hash new password and update the user record
+  // Mark OTP as verified
+  user.otp = null; // Clear the OTP after verification
+  user.otpExpiry = null; // Clear OTP expiry
+  await userRepository.save(user);
+
+  res.status(200).json({ message: 'OTP verified successfully. You can now reset your password.' });
+};
+
+
+
+// Reset Password
+export const resetPassword = async (req: Request, res: Response) => {
+  const { email, newPassword } = req.body;
+  const userRepository = AppDataSource.getRepository(User);
+  const normalizedEmail = email.toLowerCase();
+
+  const user = await userRepository.findOne({ where: { email: normalizedEmail } });
+  if (!user) {
+    return res.status(400).json({ message: 'No account found with this email address.' });
+  }
+
+  if (user.otp || user.otpExpiry) {
+    return res.status(400).json({ message: 'OTP verification is required before resetting the password.' });
+  }
+
   const hashedPassword = await bcrypt.hash(newPassword, 10);
   user.password = hashedPassword;
-  user.otp = null;
-  user.otpExpiry = null;
   await userRepository.save(user);
 
   res.status(200).json({ message: 'Password reset successful. You can now log in with your new password.' });
 };
+
 
 export const makeAdmin = async (req: Request, res: Response) => {
   if (!req.user) {
