@@ -7,14 +7,34 @@ import { sendPasswordChangeNotification } from '../services/emailNotification';
 // Get the user profile by userId
 export const getProfile = async (userId: string): Promise<Profile> => {
   const profileRepository = AppDataSource.getRepository(Profile);
+  const userRepository = AppDataSource.getRepository(User);
 
-  const profile = await profileRepository.findOne({ where: { user: { id: userId } } });
+  // First, try to fetch the profile
+  let profile = await profileRepository.findOne({ where: { user: { id: userId } } });
+
+  // If no profile exists, get the user data and create a temporary profile
   if (!profile) {
-    throw new Error('Profile not found');
+    const user = await userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Create a temporary profile using user data
+    profile = new Profile();
+    profile.firstName = user.firstName;
+    profile.lastName = user.lastName;
+    profile.email = user.email;
+    profile.phoneNumber = user.phoneNumber;
+    profile.gender = user.gender;
+
+    // Save the profile as temporary
+    profile.user = user; // Link profile to the user
+    await profileRepository.save(profile);
   }
 
   return profile;
 };
+
 
 // Update the user profile
 export const updateProfile = async (

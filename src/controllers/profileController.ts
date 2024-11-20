@@ -4,9 +4,10 @@ import { JwtPayload } from 'jsonwebtoken';
 
 export const getUserProfile = async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id as string;
-    const profile = await getProfile(userId);
+    const userId = req.user?.id as string;  // Get user ID from decoded token
+    const profile = await getProfile(userId);  // Get profile from service
 
+    // Destructure profile data
     const {
       firstName,
       lastName,
@@ -18,6 +19,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
       address,
     } = profile;
 
+    // Respond with the necessary fields, set optional fields to null if not provided
     res.status(200).json({
       firstName,
       lastName,
