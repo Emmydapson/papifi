@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "clean": "tsc --build --clean",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
-    "heroku-postbuild": "npm run build"
+    "heroku-postbuild": "npm run build",
+     "migration:generate": "npm run build && npx typeorm migration:generate -d ./dist/database.js ./src/migrations/InitialMigration"
   },
   "keywords": [],
   "author": "",
