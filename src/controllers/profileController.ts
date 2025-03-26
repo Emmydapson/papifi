@@ -40,12 +40,15 @@ export const updateUserProfile = async (req: Request, res: Response) => {
     const userId = req.user?.id as string;
     const updateFields = req.body;
 
+    // Update only the provided fields
     const updatedProfile = await updateProfile(userId, updateFields);
+
     res.status(200).json(updatedProfile);
   } catch (error) {
     res.status(500).json({ message: (error as Error).message });
   }
 };
+
 
 export const changePassword = async (req: Request, res: Response) => {
   try {

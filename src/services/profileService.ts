@@ -43,16 +43,21 @@ export const updateProfile = async (
 ): Promise<Profile> => {
   const profileRepository = AppDataSource.getRepository(Profile);
 
+  // Find the profile linked to the user
   const profile = await profileRepository.findOne({ where: { user: { id: userId } } });
   if (!profile) {
     throw new Error('Profile not found');
   }
 
-  if (profileData.email || profileData.firstName || profileData.lastName) {
+  // Prevent updates to restricted fields
+  if ('email' in profileData || 'firstName' in profileData || 'lastName' in profileData) {
     throw new Error('Cannot update email, firstName, or lastName');
   }
 
+  // Merge provided fields into the existing profile
   Object.assign(profile, profileData);
+
+  // Save the updated profile
   return profileRepository.save(profile);
 };
 

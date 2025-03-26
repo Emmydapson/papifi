@@ -1,12 +1,21 @@
 import { Request, Response } from 'express';
 import payshigaService from '../services/walletService';
 
-class PayshigaController {
-  async createWallet(req: Request, res: Response) {
-    const { userId, currency, phoneNumber, email, reference } = req.body;
-    if (!userId || !currency || !phoneNumber || !email || !reference) {
-      return res.status(400).json({ message: 'All fields are required' });
+class WalletController {
+  validateRequestBody(requiredFields: string[], body: any): string | null {
+    for (const field of requiredFields) {
+      if (!body[field]) return field;
     }
+    return null;
+  }
+
+  async createWallet(req: Request, res: Response) {
+    const missingField = this.validateRequestBody(['userId', 'currency', 'phoneNumber', 'email', 'reference'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
+    }
+
+    const { userId, currency } = req.body;
     try {
       const wallet = await payshigaService.createWallet(userId, currency);
       res.status(201).json(wallet);
@@ -17,10 +26,12 @@ class PayshigaController {
   }
 
   async sendMoney(req: Request, res: Response) {
-    const { senderWalletId, recipientWalletId, amount, currency, description } = req.body;
-    if (!senderWalletId || !recipientWalletId || !amount || !currency) {
-      return res.status(400).json({ message: 'senderWalletId, recipientWalletId, amount, and currency are required' });
+    const missingField = this.validateRequestBody(['senderWalletId', 'recipientWalletId', 'amount', 'currency'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
+
+    const { senderWalletId, recipientWalletId, amount, currency, description } = req.body;
     try {
       const transaction = await payshigaService.sendMoney(senderWalletId, recipientWalletId, amount, currency, description);
       res.status(201).json(transaction);
@@ -31,10 +42,12 @@ class PayshigaController {
   }
 
   async receiveMoney(req: Request, res: Response) {
-    const { walletId, amount, currency, transactionRef } = req.body;
-    if (!walletId || !amount || !currency || !transactionRef) {
-      return res.status(400).json({ message: 'walletId, amount, currency, and transactionRef are required' });
+    const missingField = this.validateRequestBody(['walletId', 'amount', 'currency', 'transactionRef'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
+
+    const { walletId, amount, currency, transactionRef } = req.body;
     try {
       const transaction = await payshigaService.receiveMoney(walletId, amount, currency, transactionRef);
       res.status(200).json(transaction);
@@ -45,10 +58,12 @@ class PayshigaController {
   }
 
   async convertCurrency(req: Request, res: Response) {
-    const { sourceWalletId, targetWalletId, amount } = req.body;
-    if (!sourceWalletId || !targetWalletId || !amount) {
-      return res.status(400).json({ message: 'sourceWalletId, targetWalletId, and amount are required' });
+    const missingField = this.validateRequestBody(['sourceWalletId', 'targetWalletId', 'amount'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
+
+    const { sourceWalletId, targetWalletId, amount } = req.body;
     try {
       const conversionResult = await payshigaService.convertCurrency(sourceWalletId, targetWalletId, amount);
       res.status(200).json(conversionResult);
@@ -59,15 +74,18 @@ class PayshigaController {
   }
 
   async createVirtualCard(req: Request, res: Response) {
-    const { walletId, amount, reference } = req.body;
-    if (!walletId || !amount || !reference) {
-      return res.status(400).json({ message: 'walletId, amount, and reference are required' });
+    const missingField = this.validateRequestBody(['walletId', 'amount', 'reference'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
+
+    const { amount, reference } = req.body;
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'User is not authenticated' });
+    }
+
     try {
-      const userId = req.user?.id;
-      if (!userId) {
-        return res.status(400).json({ message: 'User is not authenticated' });
-      }
       const virtualCard = await payshigaService.createVirtualCard(amount, userId, reference);
       res.status(201).json(virtualCard);
     } catch (error: any) {
@@ -77,10 +95,12 @@ class PayshigaController {
   }
 
   async lockVirtualCard(req: Request, res: Response) {
-    const { cardId, userId, reference } = req.body;
-    if (!cardId || !userId || !reference) {
-      return res.status(400).json({ message: 'cardId, userId, and reference are required' });
+    const missingField = this.validateRequestBody(['cardId', 'userId', 'reference'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
+
+    const { cardId, userId, reference } = req.body;
     try {
       const result = await payshigaService.lockVirtualCard(cardId, userId, reference);
       res.status(200).json({ message: 'Virtual card locked successfully', result });
@@ -95,6 +115,7 @@ class PayshigaController {
     if (!currency) {
       return res.status(400).json({ message: 'Currency is required' });
     }
+
     try {
       const banks = await payshigaService.getBanks(currency);
       res.status(200).json(banks);
@@ -105,10 +126,12 @@ class PayshigaController {
   }
 
   async getExchangeRate(req: Request, res: Response) {
-    const { amount, currencyFrom, currencyTo } = req.body;
-    if (!amount || !currencyFrom || !currencyTo) {
-      return res.status(400).json({ message: 'Amount, currencyFrom, and currencyTo are required' });
+    const missingField = this.validateRequestBody(['amount', 'currencyFrom', 'currencyTo'], req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
+
+    const { amount, currencyFrom, currencyTo } = req.body;
     try {
       const rate = await payshigaService.getExchangeRate(amount, currencyFrom, currencyTo);
       res.status(200).json(rate);
@@ -119,22 +142,17 @@ class PayshigaController {
   }
 
   async transferMoney(req: Request, res: Response) {
-    const {
-      accountNumber, amount, bankCode, currency, narration,
-      accountName, bankName, meta, reference, saveBeneficiary, saveBeneficiaryTag
-    } = req.body;
-
-    if (!accountNumber || !amount || !bankCode || !currency || !narration || !accountName || !bankName || !reference) {
-      return res.status(400).json({ message: 'All required fields must be provided' });
+    const requiredFields = [
+      'accountNumber', 'amount', 'bankCode', 'currency', 
+      'narration', 'accountName', 'bankName', 'reference'
+    ];
+    const missingField = this.validateRequestBody(requiredFields, req.body);
+    if (missingField) {
+      return res.status(400).json({ message: `${missingField} is required` });
     }
 
-    const transferData = {
-      accountNumber, amount, bankCode, currency, narration,
-      accountName, bankName, meta, reference, saveBeneficiary, saveBeneficiaryTag,
-    };
-
     try {
-      const transferResult = await payshigaService.transferMoney(transferData);
+      const transferResult = await payshigaService.transferMoney(req.body);
       res.status(200).json(transferResult);
     } catch (error: any) {
       console.error('Error transferring money:', error);
@@ -143,5 +161,4 @@ class PayshigaController {
   }
 }
 
-export default new PayshigaController();
-                                                                                                                                                                                                                                                                                                                                                    
+export default new WalletController();
