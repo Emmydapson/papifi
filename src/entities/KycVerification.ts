@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import { User } from './User';
 
 export type KycType = 'NIN_SELFIE' | 'PHOTOID_SELFIE' | 'LIVENESS';
 
@@ -29,4 +30,8 @@ export class KycVerification {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @ManyToOne(() => User, (user) => user.kycVerifications, { onDelete: 'CASCADE' })
+  user!: User;
+
 }

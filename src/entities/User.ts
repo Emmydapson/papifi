@@ -7,6 +7,7 @@ import {
   BeforeInsert,
 } from 'typeorm';
 import { Wallet } from './Wallet';
+import { KycVerification } from './KycVerification';
 
 @Entity()
 export class User {
@@ -64,6 +65,10 @@ export class User {
     default: 'user',
   })
   role!: 'user' | 'admin' | 'super_admin';
+
+  @OneToMany(() => KycVerification, (kyc) => kyc.user)
+kycVerifications!: KycVerification[];
+
 
   @BeforeInsert()
   validatePhoneNumber() {
