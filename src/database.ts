@@ -6,6 +6,7 @@ import { Profile } from "./entities/profile";
 import path from 'path';
 import { VirtualCard } from './entities/virtualCard';
 import { Transaction } from './entities/Transaction';
+import { KycVerification } from './entities/KycVerification';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -14,7 +15,7 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  entities: [User, Wallet, Profile, VirtualCard, Transaction],
+  entities: [User, Wallet, Profile, VirtualCard, Transaction, KycVerification ],
   migrations: [path.join(__dirname, 'migrations', '*.{ts,js}')],  // Add migration path
   synchronize: false, // Set to false in production
   logging: true,

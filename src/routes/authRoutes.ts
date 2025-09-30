@@ -11,7 +11,7 @@ import {
   makeAdmin, removeAdmin       // New import
 } from '../controllers/authController';
 import {authMiddleware} from '../middlewares/authMiddleware';
-import KYCController from '../controllers/kycControllers';
+import KYCController from '../controllers/kycController';
 
 const router = Router();
 
