@@ -8,10 +8,11 @@
     "dev": "tsc && nodemon dist/index.js",
     "start": "node dist/index.js",
     "clean": "tsc --build --clean",
-    "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
-    "heroku-postbuild": "npm run build",
-     "migration:generate": "npm run build && npx typeorm migration:generate -d ./dist/database.js ./src/migrations/InitialMigration"
-  },
+     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
+  "migration:generate": "npm run build && npx typeorm migration:generate -d ./dist/database.js",
+  "migration:run": "npx typeorm migration:run -d ./dist/database.js",
+  "migration:revert": "npx typeorm migration:revert -d ./dist/database.js"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",
