@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class AddKycVerificationTable1759226016457 implements MigrationInterface {
-    name = 'AddKycVerificationTable1759226016457'
+export class AddKycVerificationTable1759227568420 implements MigrationInterface {
+    name = 'AddKycVerificationTable1759227568420'
 
     public async up(queryRunner: QueryRunner): Promise<void> {
         await queryRunner.query(`CREATE TABLE "virtual_card" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "walletId" character varying NOT NULL, "cardNumber" character varying NOT NULL, "cvv" character varying NOT NULL, "expirationDate" character varying NOT NULL, "createdAt" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_42a5e76c9d2229e675beffd98ca" PRIMARY KEY ("id"))`);
