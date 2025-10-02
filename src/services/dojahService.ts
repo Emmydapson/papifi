@@ -1,3 +1,4 @@
+// Optional – keep only if backend may need to call Dojah in future
 import axios from 'axios';
 
 const DOJAH_BASE_URL = process.env.DOJAH_BASE_URL || 'https://sandbox.dojah.io/';
@@ -12,30 +13,11 @@ class DojahService {
   };
 
   async verifyPhotoIdWithSelfie(selfie: string, photoId: string) {
-    const res = await axios.post(
+    return axios.post(
       `${DOJAH_BASE_URL}/api/v1/kyc/photoid/verify`,
       { selfie_image: selfie, photoid_image: photoId },
       { headers: this.headers }
     );
-    return res.data;
-  }
-
-  async verifyNinWithSelfie(nin: string, selfie: string) {
-    const res = await axios.post(
-      `${DOJAH_BASE_URL}/api/v1/kyc/nin/verify`,
-      { nin, selfie_image: selfie },
-      { headers: this.headers }
-    );
-    return res.data;
-  }
-
-  async livenessCheck(selfie: string) {
-    const res = await axios.post(
-      `${DOJAH_BASE_URL}/api/v1/ml/liveness/`,
-      { image: selfie },
-      { headers: this.headers }
-    );
-    return res.data;
   }
 }
 

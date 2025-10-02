@@ -1,9 +1,10 @@
 import { Router } from 'express';
-import KYCController from '../controllers/kycController';
+import KYCController from '../controllers/KYCController';
 
 const router = Router();
 
-router.post('/kyc/verify', KYCController.verifyKYC);
-router.post('/kyc', KYCController.webhook); // webhook endpoint for Dojah
+router.post('/kyc/start', KYCController.startVerification);
+router.get('/kyc/:userId', KYCController.getUserKYCStatus);
+router.post('/kyc', KYCController.webhook); // webhook from Dojah
 
 export default router;

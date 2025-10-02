@@ -11,7 +11,6 @@ import {
   makeAdmin, removeAdmin       // New import
 } from '../controllers/authController';
 import {authMiddleware} from '../middlewares/authMiddleware';
-import KYCController from '../controllers/kycController';
 
 const router = Router();
 
@@ -20,7 +19,6 @@ router.post('/verify-otp', verifyOtp);
 router.post('/login', loginUser);
 router.post('/resend-otp', resendOtp);
 console.log('Resend OTP route hit');
-router.post('/kyc/verify', KYCController.verifyKYC);
 router.post('/create-pin', createTransactionPin);
 router.post('/make-admin', authMiddleware, makeAdmin); // Requires token
 router.post('/remove-admin', authMiddleware, removeAdmin);
