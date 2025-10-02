@@ -35,7 +35,7 @@ app.use(
   session({
     store: new PgSessionStore({
       pool: pgPool, 
-    a  tableName: 'session', 
+     tableName: 'session', 
     }),
     secret: process.env.SESSION_SECRET || 'fallback_secret_key', // Use a secret key from .env
     resave: false, 
