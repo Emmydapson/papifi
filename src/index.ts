@@ -8,6 +8,8 @@ import { AppDataSource } from './database'; // Database connection
 import pg from 'pg'; 
 import pgSession from 'connect-pg-simple'; 
 import "reflect-metadata";
+import kycRoutes from './routes/kycRoutes';
+
 
 
 dotenv.config();
@@ -33,7 +35,7 @@ app.use(
   session({
     store: new PgSessionStore({
       pool: pgPool, 
-      tableName: 'session', 
+    a  tableName: 'session', 
     }),
     secret: process.env.SESSION_SECRET || 'fallback_secret_key', // Use a secret key from .env
     resave: false, 
@@ -59,6 +61,8 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/wallet', walletRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/kyc', kycRoutes);
+
 
 
 // Initialize the data source and start the server
