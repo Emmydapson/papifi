@@ -8,6 +8,8 @@ import {
 } from 'typeorm';
 import { User } from './User';
 
+export type Currency = 'NGN' | 'USD' | 'GBP';
+
 @Entity()
 export class Wallet {
   @PrimaryGeneratedColumn('uuid')
@@ -27,19 +29,18 @@ export class Wallet {
   bankName?: string;
 
   /** 🪙 Default Currency */
- @Column({ type: 'enum', enum: ['NGN', 'USD', 'GBP'], default: 'NGN' })
-currency!: 'NGN' | 'USD' | 'GBP';
-
+  @Column({ type: 'enum', enum: ['NGN', 'USD', 'GBP'], default: 'NGN' })
+  currency!: Currency;
 
   /** 💰 Balances */
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   NGN!: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  GBP!: number;
+  USD!: number;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-  USD!: number;
+  GBP!: number;
 
   @CreateDateColumn()
   createdAt!: Date;
@@ -48,8 +49,8 @@ currency!: 'NGN' | 'USD' | 'GBP';
   updatedAt!: Date;
 
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
-balance!: number;
+  balance!: number;
 
-
-  
+  /** Allow dynamic numeric access for currencies */
+  [key: string]: any;
 }

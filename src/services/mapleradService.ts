@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import PQueue from 'p-queue';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
-import { Wallet } from '../entities/Wallet';
+import { Currency, Wallet } from '../entities/Wallet';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
 
@@ -122,48 +122,53 @@ export class MapleRadService {
   async createWithdrawal(
   userId: string,
   amount: number,
-  currency: 'NGN' | 'USD' | 'GBP',
+  currency: Currency,
   destination: { bankCode: string; accountNumber: string; accountName?: string },
   description?: string
-)
- {
-    const user = await this.userRepo.findOne({ where: { id: userId } });
-    if (!user) throw new Error('User not found');
+) {
+  const user = await this.userRepo.findOne({ where: { id: userId } });
+  if (!user) throw new Error('User not found');
 
-    const customerId = await this.ensureMapleRadCustomer(user.id);
-    const payload = {
-      customer_id: customerId,
-      amount,
-      currency,
-      reason: description || 'Wallet withdrawal',
-      destination: { type: 'bank_account', bank_code: destination.bankCode, account_number: destination.accountNumber, name: destination.accountName || `${user.firstName} ${user.lastName}` },
-    };
+  const customerId = await this.ensureMapleRadCustomer(user.id);
+  const payload = {
+    customer_id: customerId,
+    amount,
+    currency,
+    reason: description || 'Wallet withdrawal',
+    destination: {
+      type: 'bank_account',
+      bank_code: destination.bankCode,
+      account_number: destination.accountNumber,
+      name: destination.accountName || `${user.firstName} ${user.lastName}`,
+    },
+  };
 
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() }));
-    const data = res.data?.data || res.data;
+  const res = await this.queue.add(() =>
+    this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() })
+  );
+  const data = res.data?.data || res.data;
 
-    // Save to Transaction table
-    const tx = new Transaction();
-    tx.user = user;
-    tx.amount = amount;
-    tx.currency = currency;
-    tx.type = 'withdrawal';
-    tx.status = data.status || 'pending';
-    tx.reference = data.reference || data.id;
-    tx.description = description || 'Wallet withdrawal';
-    await this.txRepo.save(tx);
+  // Save transaction
+  const tx = new Transaction();
+  tx.user = user;
+  tx.amount = amount;
+  tx.currency = currency;
+  tx.type = 'withdrawal';
+  tx.status = data.status || 'pending';
+  tx.reference = data.reference || data.id;
+  tx.description = description || 'Wallet withdrawal';
+  await this.txRepo.save(tx);
 
-    // Update wallet balance
-    const wallet = await this.walletRepo.findOne({ where: { user: { id: user.id }, currency } });
-    if (wallet) {
-      const key = currency as keyof Wallet;
-wallet[key] = (Number(wallet[key]) - Number(amount)) as any;
-
-      await this.walletRepo.save(wallet);
-    }
-
-    return data;
+  // Update wallet balance
+  const wallet = await this.walletRepo.findOne({ where: { user: { id: user.id }, currency } });
+  if (wallet) {
+    wallet[currency] = Number(wallet[currency]) - amount;
+    await this.walletRepo.save(wallet);
   }
+
+  return data;
+}
+
 
   /** -------------------------------
    * VIRTUAL CARDS
@@ -188,43 +193,44 @@ wallet[key] = (Number(wallet[key]) - Number(amount)) as any;
     return data;
   }
 
-  async fundCard(cardId: string, amount: number, currency = 'USD') {
-    const scaledAmount = amount * 100;
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaledAmount }, { headers: this.getSecretHeaders() }));
-    
-    // Update wallet
-    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
-    if (card) {
-      const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
-      if (wallet) {
-       const key = currency as keyof Wallet;
-wallet[key] = (Number(wallet[key]) - Number(amount)) as any;
+  async fundCard(cardId: string, amount: number, currency: Currency = 'USD') {
+  const scaledAmount = amount * 100;
+  const res = await this.queue.add(() =>
+    this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaledAmount }, { headers: this.getSecretHeaders() })
+  );
 
-        await this.walletRepo.save(wallet);
-      }
+  // Update wallet
+  const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
+  if (card) {
+    const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
+    if (wallet) {
+      wallet[currency] = Number(wallet[currency]) - amount;
+      await this.walletRepo.save(wallet);
     }
-
-    return res.data;
   }
 
-  async withdrawFromCard(cardId: string, amount: number, currency = 'USD') {
-    const scaledAmount = amount * 100;
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaledAmount }, { headers: this.getSecretHeaders() }));
+  return res.data;
+}
 
-    // Update wallet
-    const card = await this.cardRepo.findOne({ where: { id: cardId } });
-    if (card) {
-      const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
-      if (wallet) {
-        const key = currency as keyof Wallet;
-wallet[key] = (Number(wallet[key]) - Number(amount)) as any;
 
-        await this.walletRepo.save(wallet);
-      }
+  async withdrawFromCard(cardId: string, amount: number, currency: Currency = 'USD') {
+  const scaledAmount = amount * 100;
+  const res = await this.queue.add(() =>
+    this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaledAmount }, { headers: this.getSecretHeaders() })
+  );
+
+  // Update wallet
+  const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
+  if (card) {
+    const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
+    if (wallet) {
+      wallet[currency] = Number(wallet[currency]) - amount;
+      await this.walletRepo.save(wallet);
     }
-
-    return res.data;
   }
+
+  return res.data;
+}
 
   async freezeCard(cardId: string) {
     const res = await this.queue.add(() => this.http.patch(`${this.baseUrl}/issuing/${cardId}/freeze`, {}, { headers: this.getSecretHeaders() }));

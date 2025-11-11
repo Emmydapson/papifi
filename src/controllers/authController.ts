@@ -4,7 +4,7 @@ import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import jwt from 'jsonwebtoken';
 import { sendOTPEmail } from '../services/emailNotification';
-import payshigaService from '../services/walletService';
+
 
 const OTP_EXPIRY_TIME = 5 * 60 * 1000; // 5 minutes
 const RESET_OTP_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
