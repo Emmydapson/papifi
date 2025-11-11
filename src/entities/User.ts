@@ -23,7 +23,7 @@ export class User {
   @Column({ unique: true })
   email!: string;
 
-  @Column({ unique: true }) // Ensure phone number is unique
+  @Column({ unique: true })
   phoneNumber!: string;
 
   @Column({ unique: false })
@@ -50,6 +50,10 @@ export class User {
   @Column({ default: false })
   isVerified!: boolean;
 
+  /** 🟢 Maplerad Customer ID (used for account/virtual card/transfer operations) */
+  @Column({ nullable: true })
+  mapleradCustomerId?: string;
+
   @CreateDateColumn()
   createdAt!: Date;
 
@@ -59,6 +63,8 @@ export class User {
   @Column({ default: false })
   isKYCVerified!: boolean;
 
+  
+
   @Column({
     type: 'enum',
     enum: ['user', 'admin', 'super_admin'],
@@ -67,12 +73,11 @@ export class User {
   role!: 'user' | 'admin' | 'super_admin';
 
   @OneToMany(() => KycVerification, (kyc) => kyc.user)
-kycVerifications!: KycVerification[];
-
+  kycVerifications!: KycVerification[];
 
   @BeforeInsert()
   validatePhoneNumber() {
-    const phonePattern = /^\+[1-9]\d{1,14}$/; // Validates phone number with country code
+    const phonePattern = /^\+[1-9]\d{1,14}$/;
     if (!phonePattern.test(this.phoneNumber)) {
       throw new Error(
         'Phone number must include a valid country code (e.g., +123456789).'

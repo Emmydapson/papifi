@@ -13,17 +13,32 @@ export class Wallet {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @ManyToOne(() => User, (user) => user.wallets, { eager: true }) // Optional: set eager loading if needed
+  @ManyToOne(() => User, (user) => user.wallets, { eager: true })
   user!: User;
 
-  @Column({ type: 'decimal', default: 0 })
+  /** 🟢 Maplerad Virtual Account Details */
+  @Column({ nullable: true })
+  mapleradAccountId?: string;
+
+  @Column({ nullable: true })
+  accountNumber?: string;
+
+  @Column({ nullable: true })
+  bankName?: string;
+
+  /** 🪙 Default Currency */
+ @Column({ type: 'enum', enum: ['NGN', 'USD', 'GBP'], default: 'NGN' })
+currency!: 'NGN' | 'USD' | 'GBP';
+
+
+  /** 💰 Balances */
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   NGN!: number;
 
-  @Column({ type: 'decimal', default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   GBP!: number;
 
-
-  @Column({ type: 'decimal', default: 0 })
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   USD!: number;
 
   @CreateDateColumn()
@@ -31,4 +46,10 @@ export class Wallet {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+balance!: number;
+
+
+  
 }

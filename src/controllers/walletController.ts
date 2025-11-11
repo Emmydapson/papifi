@@ -1,164 +1,164 @@
-import { Request, Response } from 'express';
-import payshigaService from '../services/walletService';
+/* ---------------------------------------------
+FILE: src/controllers/wallet.controller.ts
+--------------------------------------------- */
 
-class WalletController {
-  validateRequestBody(requiredFields: string[], body: any): string | null {
-    for (const field of requiredFields) {
-      if (!body[field]) return field;
-    }
-    return null;
+import { Router, Request, Response } from 'express';
+import { AppDataSource } from '../database';
+import { User } from '../entities/User';
+import { Wallet } from '../entities/Wallet';
+import { VirtualCard } from '../entities/virtualCard';
+import { MapleRadService } from '../services/mapleradService';
+
+const router = Router();
+const mapleRadService = new MapleRadService();
+const userRepo = AppDataSource.getRepository(User);
+const walletRepo = AppDataSource.getRepository(Wallet);
+const cardRepo = AppDataSource.getRepository(VirtualCard);
+
+/** ------------------------------
+ * WALLET ENDPOINTS
+ * ------------------------------ */
+
+// create virtual account / deposit account for user
+router.post('/create/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const result = await mapleRadService.createVirtualAccountForUser(userId, 'NGN');
+    return res.status(201).json({ ok: true, result });
+  } catch (err: any) {
+    console.error('create virtual account error:', err?.message || err);
+    return res.status(400).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async createWallet(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['userId', 'currency', 'phoneNumber', 'email', 'reference'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
-
-    const { userId, currency } = req.body;
-    try {
-      const wallet = await payshigaService.createWallet(userId, currency);
-      res.status(201).json(wallet);
-    } catch (error: any) {
-      console.error('Error creating wallet:', error);
-      res.status(500).json({ message: 'Error creating wallet', error: error.message });
-    }
+// get wallet balances for user
+router.get('/balance/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const user = await userRepo.findOne({ where: { id: userId }, relations: ['wallets'] });
+    if (!user) return res.status(404).json({ ok: false, message: 'user not found' });
+    return res.json({ ok: true, wallets: user.wallets });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async sendMoney(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['senderWalletId', 'recipientWalletId', 'amount', 'currency'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
+// initiate withdrawal from wallet to bank
+router.post('/withdraw', async (req: Request, res: Response) => {
+  try {
+    const { userId, amount, currency, bankCode, accountNumber, accountName, description } = req.body;
+    if (!userId || !amount || !currency || !bankCode || !accountNumber)
+      return res.status(400).json({ ok: false, message: 'missing parameters' });
 
-    const { senderWalletId, recipientWalletId, amount, currency, description } = req.body;
-    try {
-      const transaction = await payshigaService.sendMoney(senderWalletId, recipientWalletId, amount, currency, description);
-      res.status(201).json(transaction);
-    } catch (error: any) {
-      console.error('Error sending money:', error);
-      res.status(500).json({ message: 'Error sending money', error: error.message });
-    }
+    const result = await mapleRadService.createWithdrawal(
+      userId,
+      Number(amount),
+      currency,
+      { bankCode, accountNumber, accountName },
+      description
+    );
+
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error('withdraw error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async receiveMoney(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['walletId', 'amount', 'currency', 'transactionRef'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
+/** ------------------------------
+ * VIRTUAL CARD ENDPOINTS
+ * ------------------------------ */
 
-    const { walletId, amount, currency, transactionRef } = req.body;
-    try {
-      const transaction = await payshigaService.receiveMoney(walletId, amount, currency, transactionRef);
-      res.status(200).json(transaction);
-    } catch (error: any) {
-      console.error('Error receiving money:', error);
-      res.status(500).json({ message: 'Error receiving money', error: error.message });
-    }
+// create virtual card
+router.post('/cards/create', async (req: Request, res: Response) => {
+  try {
+    const { walletId, currency } = req.body;
+    if (!walletId || !currency) return res.status(400).json({ ok: false, message: 'walletId and currency required' });
+
+    const cardData = await mapleRadService.createVirtualCard(walletId, currency);
+
+    const wallet = await walletRepo.findOne({ where: { id: walletId } });
+if (!wallet) return res.status(404).json({ ok: false, message: 'wallet not found' });
+
+const newCard = cardRepo.create({
+  wallet,
+  cardNumber: cardData.cardNumber,
+  cvv: cardData.cvv,
+  expirationDate: cardData.expirationDate,
+});
+
+
+    await cardRepo.save(newCard);
+
+    return res.json({ ok: true, card: newCard });
+  } catch (err: any) {
+    console.error('create card error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async convertCurrency(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['sourceWalletId', 'targetWalletId', 'amount'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
+// fund virtual card
+router.post('/cards/:id/fund', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { amount, currency } = req.body;
+    if (!amount || !currency) return res.status(400).json({ ok: false, message: 'amount and currency required' });
 
-    const { sourceWalletId, targetWalletId, amount } = req.body;
-    try {
-      const conversionResult = await payshigaService.convertCurrency(sourceWalletId, targetWalletId, amount);
-      res.status(200).json(conversionResult);
-    } catch (error: any) {
-      console.error('Error converting currency:', error);
-      res.status(500).json({ message: 'Error converting currency', error: error.message });
-    }
+    const result = await mapleRadService.fundCard(id, Number(amount), currency);
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error('fund card error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async createVirtualCard(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['walletId', 'amount', 'reference'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
+// withdraw from virtual card
+router.post('/cards/:id/withdraw', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { amount, currency } = req.body;
+    if (!amount || !currency) return res.status(400).json({ ok: false, message: 'amount and currency required' });
 
-    const { amount, reference } = req.body;
-    const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ message: 'User is not authenticated' });
-    }
-
-    try {
-      const virtualCard = await payshigaService.createVirtualCard(amount, userId, reference);
-      res.status(201).json(virtualCard);
-    } catch (error: any) {
-      console.error('Error creating virtual card:', error);
-      res.status(500).json({ message: 'Error creating virtual card', error: error.message });
-    }
+    const result = await mapleRadService.withdrawFromCard(id, Number(amount), currency);
+    return res.json({ ok: true, result });
+  } catch (err: any) {
+    console.error('withdraw from card error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async lockVirtualCard(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['cardId', 'userId', 'reference'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
+// freeze virtual card
+router.post('/cards/:id/freeze', async (req: Request, res: Response) => {
+  try {
+    const card = await cardRepo.findOne({ where: { id: req.params.id } });
+    if (!card) return res.status(404).json({ ok: false, message: 'Card not found' });
 
-    const { cardId, userId, reference } = req.body;
-    try {
-      const result = await payshigaService.lockVirtualCard(cardId, userId, reference);
-      res.status(200).json({ message: 'Virtual card locked successfully', result });
-    } catch (error: any) {
-      console.error('Error locking virtual card:', error);
-      res.status(500).json({ message: 'Error locking virtual card', error: error.message });
-    }
+    await mapleRadService.freezeCard(card.cardNumber);
+    card.isFrozen = true;
+    await cardRepo.save(card);
+
+    return res.json({ ok: true, message: 'Card frozen successfully', card });
+  } catch (err: any) {
+    console.error('freeze card error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async getBanks(req: Request, res: Response) {
-    const { currency } = req.params;
-    if (!currency) {
-      return res.status(400).json({ message: 'Currency is required' });
-    }
+// unfreeze virtual card
+router.post('/cards/:id/unfreeze', async (req: Request, res: Response) => {
+  try {
+    const card = await cardRepo.findOne({ where: { id: req.params.id } });
+    if (!card) return res.status(404).json({ ok: false, message: 'Card not found' });
 
-    try {
-      const banks = await payshigaService.getBanks(currency);
-      res.status(200).json(banks);
-    } catch (error: any) {
-      console.error('Error fetching banks:', error);
-      res.status(500).json({ message: 'Error fetching banks', error: error.message });
-    }
+    await mapleRadService.unfreezeCard(card.cardNumber);
+    card.isFrozen = false;
+    await cardRepo.save(card);
+
+    return res.json({ ok: true, message: 'Card unfrozen successfully', card });
+  } catch (err: any) {
+    console.error('unfreeze card error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
+});
 
-  async getExchangeRate(req: Request, res: Response) {
-    const missingField = this.validateRequestBody(['amount', 'currencyFrom', 'currencyTo'], req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
-
-    const { amount, currencyFrom, currencyTo } = req.body;
-    try {
-      const rate = await payshigaService.getExchangeRate(amount, currencyFrom, currencyTo);
-      res.status(200).json(rate);
-    } catch (error: any) {
-      console.error('Error fetching exchange rate:', error);
-      res.status(500).json({ message: 'Error fetching exchange rate', error: error.message });
-    }
-  }
-
-  async transferMoney(req: Request, res: Response) {
-    const requiredFields = [
-      'accountNumber', 'amount', 'bankCode', 'currency', 
-      'narration', 'accountName', 'bankName', 'reference'
-    ];
-    const missingField = this.validateRequestBody(requiredFields, req.body);
-    if (missingField) {
-      return res.status(400).json({ message: `${missingField} is required` });
-    }
-
-    try {
-      const transferResult = await payshigaService.transferMoney(req.body);
-      res.status(200).json(transferResult);
-    } catch (error: any) {
-      console.error('Error transferring money:', error);
-      res.status(500).json({ message: 'Error transferring money', error: error.message });
-    }
-  }
-}
-
-export default new WalletController();
+export default router;
