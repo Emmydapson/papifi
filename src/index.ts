@@ -9,6 +9,7 @@ import pg from 'pg';
 import pgSession from 'connect-pg-simple'; 
 import "reflect-metadata";
 import kycRoutes from './routes/kycRoutes';
+import transactionRoutes from './routes/transactionRoutes';
 
 
 
@@ -59,9 +60,11 @@ app.get('/health', (req, res) => {
 
 // Use routes after initializing session middleware
 app.use('/api/auth', authRoutes);
-app.use('/api/wallet', walletRoutes);
+app.use('/api', walletRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/kyc', kycRoutes);
+app.use('/api', transactionRoutes);
+
 
 
 

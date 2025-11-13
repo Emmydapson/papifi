@@ -1,13 +1,14 @@
 /* ---------------------------------------------
 FILE: src/controllers/wallet.controller.ts
 --------------------------------------------- */
-
+import express from 'express';
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import { Wallet } from '../entities/Wallet';
 import { VirtualCard } from '../entities/virtualCard';
 import { MapleRadService } from '../services/mapleradService';
+
 
 const router = Router();
 const mapleRadService = new MapleRadService();
@@ -160,5 +161,32 @@ router.post('/cards/:id/unfreeze', async (req: Request, res: Response) => {
     return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
 });
+
+// Add this in wallet.controller.ts
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
+  try {
+    const signature = req.headers[process.env.MAPLERAD_SIGNATURE_HEADER || 'x-maplerad-signature'] as string;
+    const rawBody = req.body.toString();
+
+    if (!signature) {
+      return res.status(400).json({ ok: false, message: 'Missing signature header' });
+    }
+
+    const isValid = mapleRadService.verifyWebhookSignature(signature, rawBody);
+    if (!isValid) {
+      return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
+    }
+
+    const eventData = await mapleRadService.handleWebhook(rawBody);
+    // Optional: log or handle specific events here
+    console.log('Webhook event processed:', eventData);
+
+    return res.status(200).json({ ok: true });
+  } catch (err: any) {
+    console.error('Webhook processing error:', err?.message || err);
+    return res.status(500).json({ ok: false, message: err?.message || 'Internal error' });
+  }
+});
+
 
 export default router;
