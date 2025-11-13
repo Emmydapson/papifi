@@ -1,6 +1,4 @@
 declare module 'p-queue' {
-  import { PromiseLike } from 'es6-promise';
-
   export interface Options {
     interval?: number;
     intervalCap?: number;
@@ -9,7 +7,7 @@ declare module 'p-queue' {
 
   export default class PQueue {
     constructor(options?: Options);
-    add<T>(fn: () => Promise<T> | T): Promise<T>; // ✅ Fix: always return Promise<T>, never void
+    add<T>(fn: () => Promise<T> | T): Promise<T>; // ✅ Always return Promise<T>
     onEmpty(): Promise<void>;
     onIdle(): Promise<void>;
     clear(): void;
