@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import crypto from 'crypto';
 import PQueue from 'p-queue';
 import { AppDataSource } from '../database';
@@ -179,7 +179,7 @@ export class MapleRadService {
     const payload: any = { customer_id: customerId, currency, type: 'VIRTUAL', auto_approve: true, brand };
     if (amount) payload.amount = amount * 100;
 
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/issuing`, payload, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() => this.http.post(`${this.baseUrl}/issuing`, payload, { headers: this.getSecretHeaders() }));
     const data = res.data?.data || res.data;
 
     // Save virtual card
@@ -233,12 +233,12 @@ export class MapleRadService {
 }
 
   async freezeCard(cardId: string) {
-    const res = await this.queue.add(() => this.http.patch(`${this.baseUrl}/issuing/${cardId}/freeze`, {}, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() => this.http.patch(`${this.baseUrl}/issuing/${cardId}/freeze`, {}, { headers: this.getSecretHeaders() }));
     return res.data;
   }
 
   async unfreezeCard(cardId: string) {
-    const res = await this.queue.add(() => this.http.patch(`${this.baseUrl}/issuing/${cardId}/unfreeze`, {}, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() => this.http.patch(`${this.baseUrl}/issuing/${cardId}/unfreeze`, {}, { headers: this.getSecretHeaders() }));
     return res.data;
   }
 
@@ -254,7 +254,7 @@ export class MapleRadService {
   }
 
   async listBanks(country = 'NG', type = 'NUBAN', page = 1, pageSize = 100): Promise<any[]> {
-    const res = await this.queue.add(() => this.http.get(`${this.baseUrl}/institutions`, {
+    const res = await this.queue.add<AxiosResponse>(() => this.http.get(`${this.baseUrl}/institutions`, {
       params: { country, type, page, page_size: pageSize },
       headers: this.getSecretHeaders()
     }));
@@ -262,12 +262,12 @@ export class MapleRadService {
   }
 
   async getTransactions(customerId: string) {
-    const res = await this.queue.add(() => this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() => this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() }));
     return res.data?.data || [];
   }
 
   async getTransactionById(id: string) {
-    const res = await this.queue.add(() => this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() => this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() }));
     return res.data?.data;
   }
 
