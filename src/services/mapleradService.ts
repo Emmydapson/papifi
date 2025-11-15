@@ -1,11 +1,16 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import crypto from 'crypto';
-import PQueue from 'p-queue';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
+
+let PQueue: any;
+(async () => {
+  PQueue = (await import('p-queue')).default;
+})();
+
 
 export class MapleRadService {
   private readonly baseUrl = process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1';
@@ -23,23 +28,27 @@ export class MapleRadService {
   private queue: PQueue;
 
   constructor() {
-    // Rate limiter queue: max 2 requests per 500ms
-    this.queue = new PQueue({ interval: 500, intervalCap: 2 });
+  (async () => {
+    this.queue = new PQueue({
+      interval: 500,
+      intervalCap: 2,
+    });
+  })();
 
-    this.http = axios.create();
-    this.http.interceptors.response.use(
-      res => res,
-      async err => {
-        const config = err.config;
-        if (!config || !config.retryCount) config.retryCount = 0;
-        if (config.retryCount < 2) {
-          config.retryCount += 1;
-          return this.http(config);
-        }
-        return Promise.reject(err);
+  this.http = axios.create();
+  this.http.interceptors.response.use(
+    res => res,
+    async err => {
+      const config = err.config;
+      if (!config || !config.retryCount) config.retryCount = 0;
+      if (config.retryCount < 2) {
+        config.retryCount += 1;
+        return this.http(config);
       }
-    );
-  }
+      return Promise.reject(err);
+    }
+  );
+}
 
   getProviderName() { return 'MapleRad'; }
 
