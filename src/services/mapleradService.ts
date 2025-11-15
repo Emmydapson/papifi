@@ -71,7 +71,10 @@ export class MapleRadService {
 
     // Tier 0 customer creation
     const payload = { first_name: user.firstName, last_name: user.lastName, email: user.email, country: 'NG' };
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/customers`, payload, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.post(`${this.baseUrl}/customers`, payload, { headers: this.getSecretHeaders() })
+);
+
     const customerId = res.data?.data?.id;
     if (!customerId) throw new Error('Failed to create MapleRad customer');
 
@@ -81,12 +84,18 @@ export class MapleRadService {
   }
 
   async upgradeCustomerTier1(payload: any) {
-    const res = await this.queue.add(() => this.http.patch(`${this.baseUrl}/customers/upgrade/tier1`, payload, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.patch(`${this.baseUrl}/customers/upgrade/tier1`, payload, { headers: this.getSecretHeaders() })
+);
+
     return res.data?.data || res.data;
   }
 
   async verifyBvn(bvn: string) {
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/identity/bvn`, { bvn }, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.post(`${this.baseUrl}/identity/bvn`, { bvn }, { headers: this.getSecretHeaders() })
+);
+
     return res.data?.data;
   }
 
@@ -102,7 +111,10 @@ export class MapleRadService {
     const customerId = await this.ensureMapleRadCustomer(user.id);
     const payload = { customer_id: customerId, currency };
 
-    const res = await this.queue.add(() => this.http.post(`${this.baseUrl}/issuing/virtual_accounts`, payload, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.post(`${this.baseUrl}/issuing/virtual_accounts`, payload, { headers: this.getSecretHeaders() })
+);
+
     const data = res.data?.data || res.data;
 
     if (!data?.account_number) throw new Error('Failed to create virtual account');
@@ -143,9 +155,10 @@ export class MapleRadService {
     },
   };
 
-  const res = await this.queue.add(() =>
-    this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() })
-  );
+  const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() })
+);
+
   const data = res.data?.data || res.data;
 
   // Save transaction
@@ -195,9 +208,10 @@ export class MapleRadService {
 
   async fundCard(cardId: string, amount: number, currency: Currency = 'USD') {
   const scaledAmount = amount * 100;
-  const res = await this.queue.add(() =>
-    this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaledAmount }, { headers: this.getSecretHeaders() })
-  );
+  const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaledAmount }, { headers: this.getSecretHeaders() })
+);
+
 
   // Update wallet
   const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
@@ -215,9 +229,10 @@ export class MapleRadService {
 
   async withdrawFromCard(cardId: string, amount: number, currency: Currency = 'USD') {
   const scaledAmount = amount * 100;
-  const res = await this.queue.add(() =>
-    this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaledAmount }, { headers: this.getSecretHeaders() })
-  );
+  const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaledAmount }, { headers: this.getSecretHeaders() })
+);
+
 
   // Update wallet
   const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
@@ -254,21 +269,29 @@ export class MapleRadService {
   }
 
   async listBanks(country = 'NG', type = 'NUBAN', page = 1, pageSize = 100): Promise<any[]> {
-    const res = await this.queue.add<AxiosResponse>(() => this.http.get(`${this.baseUrl}/institutions`, {
-      params: { country, type, page, page_size: pageSize },
-      headers: this.getSecretHeaders()
-    }));
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.get(`${this.baseUrl}/institutions`, {
+    params: { country, type, page, page_size: pageSize },
+    headers: this.getSecretHeaders()
+  })
+);
+
     return res.data?.data || [];
   }
 
   async getTransactions(customerId: string) {
-    const res = await this.queue.add<AxiosResponse>(() => this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() }));
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() })
+);
+
     return res.data?.data || [];
   }
 
   async getTransactionById(id: string) {
-    const res = await this.queue.add<AxiosResponse>(() => this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() }));
-    return res.data?.data;
+    const res = await this.queue.add<AxiosResponse>(() =>
+  this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() })
+);
+
   }
 
   /** -------------------------------
