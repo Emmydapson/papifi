@@ -25,7 +25,8 @@ export class MapleRadService {
   private cardRepo = AppDataSource.getRepository(VirtualCard);
 
   private http: AxiosInstance;
-  private queue: PQueue;
+ private queue: any;
+
 
   constructor() {
   (async () => {
