@@ -1,7 +1,6 @@
 // src/services/mapleradService.ts
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import crypto from 'crypto';
-import PQueue from 'p-queue';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
@@ -19,6 +18,16 @@ import { VirtualCard } from '../entities/virtualCard';
  * - Wallet currency reads/writes use helpers to avoid TS index signature issues
  */
 
+ type PQueueType = any;
+let PQueue: PQueueType;
+
+async function loadPQueue() {
+  if (!PQueue) {
+    const mod = await import('p-queue');
+    PQueue = mod.default ?? mod;
+  }
+}
+
 export class MapleRadService {
   private readonly baseUrl = process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1';
   private readonly secretKey = process.env.MAPLERAD_SECRET || process.env.MAPLERAD_SECRET_KEY;
@@ -32,32 +41,47 @@ export class MapleRadService {
   private cardRepo = AppDataSource.getRepository(VirtualCard);
 
   private http: AxiosInstance;
-  private queue: PQueue;
+  private queue: any;
 
   constructor() {
-    // p-queue v9 default export is a class — import normally for types to work
-    this.queue = new PQueue({ interval: 500, intervalCap: 2 });
-
     this.http = axios.create();
-    // Basic retry interceptor - small retry on network/server errors
+
     this.http.interceptors.response.use(
       (res) => res,
       async (err) => {
         const config = err?.config;
         if (!config) return Promise.reject(err);
-        // ensure we have retryCount
+
         config.retryCount = config.retryCount || 0;
+
         if (config.retryCount < 2) {
-          config.retryCount += 1;
+          config.retryCount++;
           return this.http(config);
         }
+
         return Promise.reject(err);
       }
     );
+
+    // queue loads asynchronously
+    this.queue = null;
+
+    // load p-queue lazily
+    loadPQueue().then(() => {
+      this.queue = new PQueue({
+        interval: 500,
+        intervalCap: 2,
+      });
+    });
   }
 
   getProviderName(): string {
     return 'MapleRad';
+  }
+
+  private async q<T>(fn: () => Promise<T>): Promise<T> {
+    if (!this.queue) await loadPQueue();
+    return this.queue.add(fn);
   }
 
   private getSecretHeaders() {
