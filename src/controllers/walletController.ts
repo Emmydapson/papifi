@@ -36,6 +36,7 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
     // 2️⃣ create wallet record locally
     const wallet = walletRepo.create({
       user: { id: user.id }, // link user
+      userId: user.id,
       currency: 'NGN',
       balance: 0,
       NGN: 0,

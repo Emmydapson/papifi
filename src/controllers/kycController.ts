@@ -153,6 +153,7 @@ async webhook(req: Request, res: Response) {
             // persist wallet in DB
             wallet = walletRepo.create({
               user: { id: user.id },
+              userId: user.id,
               currency: 'NGN',
               balance: 0,
               NGN: 0,
