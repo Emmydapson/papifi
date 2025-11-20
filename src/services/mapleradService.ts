@@ -161,32 +161,46 @@ export class MapleRadService {
    * WALLET / DEPOSIT / WITHDRAWAL
    * ------------------------------- */
   async createVirtualAccountForUser(userId: string, currency: Currency = 'NGN'): Promise<any> {
-    const user = await this.userRepo.findOne({ where: { id: userId }, relations: ['wallets'] });
-    if (!user) throw new Error('User not found');
+  const user = await this.userRepo.findOne({ where: { id: userId }, relations: ['wallets'] });
+  if (!user) throw new Error(`MapleRad Error: User ${userId} not found`);
 
-    const customerId = await this.ensureMapleRadCustomer(user.id);
+  let customerId: string;
+  try {
+    customerId = await this.ensureMapleRadCustomer(user.id);
+  } catch (err: any) {
+    throw new Error(`MapleRad Error: Failed to ensure customer for user ${user.id} - ${err.message}`);
+  }
 
-    const payload = { customer_id: customerId, currency };
-
+  const payload = { customer_id: customerId, currency };
+  let data: any;
+  try {
     const res: AxiosResponse = await this.queue.add(() =>
       this.http.post(`${this.baseUrl}/issuing/virtual_accounts`, payload, { headers: this.getSecretHeaders() })
     );
-
-    const data = res.data?.data ?? res.data;
-    if (!data?.account_number) throw new Error('Failed to create virtual account');
-
-    // create and save wallet record
-    const wallet = new Wallet();
-    wallet.user = user;
-    wallet.mapleradAccountId = data.id;
-    wallet.accountNumber = data.account_number;
-    wallet.bankName = data.bank_name;
-    wallet.currency = currency;
-    // balances default to 0 via entity defaults
-    await this.walletRepo.save(wallet);
-
-    return data;
+    data = res.data?.data ?? res.data;
+  } catch (err: any) {
+    throw new Error(`MapleRad Error: Failed to call virtual_accounts endpoint - ${err.message}`);
   }
+
+  if (!data?.account_number) {
+    throw new Error(`MapleRad Error: Virtual account creation returned null for user ${user.id}`);
+  }
+
+  const wallet = new Wallet();
+  wallet.user = user;
+  wallet.mapleradAccountId = data.id;
+  wallet.accountNumber = data.account_number;
+  wallet.bankName = data.bank_name;
+  wallet.currency = currency;
+
+  try {
+    await this.walletRepo.save(wallet);
+  } catch (err: any) {
+    throw new Error(`Database Error: Failed to save wallet for user ${user.id} - ${err.message}`);
+  }
+
+  return data;
+}
 
   async createWithdrawal(
     userId: string,
