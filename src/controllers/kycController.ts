@@ -6,11 +6,13 @@ import { User } from '../entities/User';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 import { MapleRadService } from '../services/mapleradService';
+import { Wallet } from '../entities/Wallet';
 
 
 const mapleRadService = new MapleRadService();
 const kycRepo = AppDataSource.getRepository(KycVerification);
 const userRepo = AppDataSource.getRepository(User);
+const walletRepo = AppDataSource.getRepository(Wallet);
 
 class KYCController {
   /**
@@ -55,6 +57,7 @@ class KYCController {
  * Webhook endpoint Dojah calls when verification is updated.
  * URL: https://api.papifi.com/kyc
  */
+
 async webhook(req: Request, res: Response) {
   try {
     const payload = req.body;
@@ -127,44 +130,65 @@ async webhook(req: Request, res: Response) {
     verification.metadata = cleanedMetadata;
     await kycRepo.save(verification);
 
-    // If KYC passed → mark user verified and create wallet
+    let walletData = null;
+
     if (normalizedStatus === 'PASSED') {
-      const user = await userRepo.findOne({ where: { id: verification.userId } });
-      let walletData = null;
+      const user = await userRepo.findOne({
+        where: { id: verification.userId },
+        relations: ['wallets'],
+      });
 
       if (user) {
+        // mark user as KYC verified
         user.isKYCVerified = true;
         await userRepo.save(user);
 
-        try {
-          walletData = await mapleRadService.createVirtualAccountForUser(user.id, 'NGN');
-          console.log('✅ Wallet created after KYC:', walletData);
-        } catch (walletErr) {
-          console.error('Failed to create wallet after KYC:', walletErr);
-        }
-      }
+        // check if wallet already exists for NGN
+        let wallet = user.wallets?.find(w => w.currency === 'NGN');
+        if (!wallet) {
+          try {
+            // create MapleRad virtual account
+            const mapleAccount = await mapleRadService.createVirtualAccountForUser(user.id, 'NGN');
 
-      return res.status(200).json({
-        received: true,
-        kycStatus: normalizedStatus,
-        userId: user?.id,
-        wallet: walletData, // Newly created wallet info
-        message: 'KYC passed and wallet created successfully.',
-      });
+            // persist wallet in DB
+            wallet = walletRepo.create({
+              user: { id: user.id },
+              currency: 'NGN',
+              balance: 0,
+              NGN: 0,
+              USD: 0,
+              GBP: 0,
+              mapleradAccountId: mapleAccount.accountId || mapleAccount.id,
+            });
+            await walletRepo.save(wallet);
+            console.log('✅ Wallet created after KYC:', wallet);
+          } catch (walletErr) {
+            console.error('Failed to create wallet after KYC:', walletErr);
+          }
+        } else {
+          console.log('⚠ Wallet already exists for user:', user.id);
+        }
+
+        walletData = wallet;
+      }
     }
 
-    // For non-PASSED statuses
     return res.status(200).json({
       received: true,
       kycStatus: normalizedStatus,
-      message: `KYC status updated: ${normalizedStatus}`,
+      userId: verification.userId,
+      wallet: walletData,
+      message:
+        normalizedStatus === 'PASSED'
+          ? 'KYC passed and wallet created successfully.'
+          : `KYC status updated: ${normalizedStatus}`,
     });
-
   } catch (error: any) {
     console.error('Webhook error:', error);
     return res.status(500).json({ message: 'Webhook error', error: error.message });
   }
 }
+
 
   /**
    * Fetch the latest KYC status for a user

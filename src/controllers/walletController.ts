@@ -24,13 +24,36 @@ const cardRepo = AppDataSource.getRepository(VirtualCard);
 router.post('/create/:userId', async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
-    const result = await mapleRadService.createVirtualAccountForUser(userId, 'NGN');
-    return res.status(201).json({ ok: true, result });
+
+    // fetch user
+    const user = await userRepo.findOne({ where: { id: userId } });
+    if (!user) return res.status(404).json({ ok: false, message: 'User not found' });
+
+    // 1️⃣ create virtual account via MapleRad
+    const mapleAccount = await mapleRadService.createVirtualAccountForUser(user.id, 'NGN');
+    if (!mapleAccount) throw new Error('Failed to create virtual account on MapleRad');
+
+    // 2️⃣ create wallet record locally
+    const wallet = walletRepo.create({
+      user: { id: user.id }, // link user
+      currency: 'NGN',
+      balance: 0,
+      NGN: 0,
+      USD: 0,
+      GBP: 0,
+      mapleradAccountId: mapleAccount.accountId || mapleAccount.id, // whatever MapleRad returns
+    });
+
+    await walletRepo.save(wallet);
+
+    // 3️⃣ return wallet info for frontend
+    return res.status(201).json({ ok: true, wallet });
   } catch (err: any) {
     console.error('create virtual account error:', err?.message || err);
     return res.status(400).json({ ok: false, message: err?.message || 'error' });
   }
 });
+
 
 // get wallet balances for user
 router.get('/balance/:userId', async (req: Request, res: Response) => {
