@@ -15,15 +15,21 @@ class KYCController {
    * We create a verification record and return a referenceId.
    */
   async startVerification(req: Request, res: Response) {
-  const { userId, type } = req.body;
+  const { type } = req.body;
+  
+  // Get userId from JWT (populated by authMiddleware)
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. User not authenticated.' });
+  }
 
   try {
     const referenceId = `kyc_${userId}_${uuidv4()}`;
 
     const verification = kycRepo.create({
-      user: { id: userId } as User,   // ✅ relation instead of userId
+      user: { id: userId } as User, // relation
       type,
-      status: 'PENDING',              // ✅ matches enum
+      status: 'PENDING',
       metadata: { referenceId },
     });
 
@@ -143,34 +149,36 @@ class KYCController {
    * GET /kyc/:userId
    */
   async getUserKYCStatus(req: Request, res: Response) {
-    const { userId } = req.params;
-
-    try {
-      const verification = await kycRepo.findOne({
-        where: { user: { id: userId } },
-        order: { createdAt: 'DESC' }, // latest attempt
-      });
-
-      if (!verification) {
-        return res.status(404).json({ message: 'No KYC record found' });
-      }
-
-      res.status(200).json({
-        userId,
-        status: verification.status,
-        type: verification.type,
-        confidence: verification.confidence,
-        metadata: verification.metadata,
-        createdAt: verification.createdAt,
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        message: 'Error fetching KYC status',
-        error: error.message,
-      });
-    }
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized. User not authenticated.' });
   }
 
+  try {
+    const verification = await kycRepo.findOne({
+      where: { user: { id: userId } },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!verification) {
+      return res.status(404).json({ message: 'No KYC record found' });
+    }
+
+    res.status(200).json({
+      userId,
+      status: verification.status,
+      type: verification.type,
+      confidence: verification.confidence,
+      metadata: verification.metadata,
+      createdAt: verification.createdAt,
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      message: 'Error fetching KYC status',
+      error: error.message,
+    });
+  }
+}
 }
 
 export default new KYCController();

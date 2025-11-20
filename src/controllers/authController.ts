@@ -174,12 +174,10 @@ export const loginUser = async (req: Request, res: Response) => {
   const user = await userRepository.findOne({ where: { email: normalizedEmail } });
 
   if (!user || !(await bcrypt.compare(password, user.password))) {
-      console.error('Invalid login attempt:', { email: normalizedEmail, valid: user !== null });
       return res.status(400).json({ message: 'Invalid credentials. Please check your email and password and try again.' });
   }
 
   if (!user.isVerified) {
-      console.error('User not verified:', user.email);
       return res.status(400).json({ message: 'Your account is not verified. Please verify your account to log in.' });
   }
 
@@ -188,10 +186,17 @@ export const loginUser = async (req: Request, res: Response) => {
       return res.status(500).json({ message: 'Internal server error: JWT_SECRET is not defined in environment variables.' });
   }
 
+  // Include user id and email in JWT
   const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
 
-  res.status(200).json({ token, message: 'Login successful. Welcome back!' });
+  // Return user id in response alongside token
+  res.status(200).json({
+    token,
+    userId: user.id,   // <-- new addition
+    message: 'Login successful. Welcome back!'
+  });
 };
+
 
 // Request Password Reset
 export const requestPasswordReset = async (req: Request, res: Response) => {
