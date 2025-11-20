@@ -5,7 +5,10 @@ import { KycVerification } from '../entities/KycVerification';
 import { User } from '../entities/User';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
+import { MapleRadService } from '../services/mapleradService';
 
+
+const mapleRadService = new MapleRadService();
 const kycRepo = AppDataSource.getRepository(KycVerification);
 const userRepo = AppDataSource.getRepository(User);
 
@@ -48,11 +51,11 @@ class KYCController {
   }
 }
 
-  /**
-   * Webhook endpoint Dojah calls when verification is updated.
-   * URL: https://api.papifi.com/kyc
-   */
-  async webhook(req: Request, res: Response) {
+ /**
+ * Webhook endpoint Dojah calls when verification is updated.
+ * URL: https://api.papifi.com/kyc
+ */
+async webhook(req: Request, res: Response) {
   try {
     const payload = req.body;
     const signature = req.headers['x-dojah-signature'] as string;
@@ -88,7 +91,6 @@ class KYCController {
     // Map statuses
     const dojahStatus = payload.verification_status || payload.status;
     let normalizedStatus: 'PENDING' | 'PASSED' | 'FAILED' = 'PENDING';
-
     switch (dojahStatus) {
       case 'Completed':
         normalizedStatus = 'PASSED';
@@ -96,11 +98,9 @@ class KYCController {
       case 'Failed':
         normalizedStatus = 'FAILED';
         break;
-      default:
-        normalizedStatus = 'PENDING';
     }
 
-    // Extract only useful fields from payload
+    // Extract useful metadata
     const cleanedMetadata = {
       referenceId,
       verificationUrl: payload.verification_url,
@@ -125,22 +125,44 @@ class KYCController {
     verification.status = normalizedStatus;
     verification.confidence = payload.confidence_value ?? null;
     verification.metadata = cleanedMetadata;
-
     await kycRepo.save(verification);
 
-    // If KYC passed → mark user verified
+    // If KYC passed → mark user verified and create wallet
     if (normalizedStatus === 'PASSED') {
       const user = await userRepo.findOne({ where: { id: verification.userId } });
+      let walletData = null;
+
       if (user) {
         user.isKYCVerified = true;
         await userRepo.save(user);
+
+        try {
+          walletData = await mapleRadService.createVirtualAccountForUser(user.id, 'NGN');
+          console.log('✅ Wallet created after KYC:', walletData);
+        } catch (walletErr) {
+          console.error('Failed to create wallet after KYC:', walletErr);
+        }
       }
+
+      return res.status(200).json({
+        received: true,
+        kycStatus: normalizedStatus,
+        userId: user?.id,
+        wallet: walletData, // Newly created wallet info
+        message: 'KYC passed and wallet created successfully.',
+      });
     }
 
-    res.status(200).json({ received: true });
+    // For non-PASSED statuses
+    return res.status(200).json({
+      received: true,
+      kycStatus: normalizedStatus,
+      message: `KYC status updated: ${normalizedStatus}`,
+    });
+
   } catch (error: any) {
     console.error('Webhook error:', error);
-    res.status(500).json({ message: 'Webhook error', error: error.message });
+    return res.status(500).json({ message: 'Webhook error', error: error.message });
   }
 }
 
