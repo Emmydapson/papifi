@@ -42,6 +42,13 @@ export class Wallet {
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   GBP!: number;
 
+@Column({ nullable: true })
+usdAccountId: string;
+
+@Column({ default: "pending" })
+usdAccountStatus: "pending" | "approved" | "rejected";
+
+
   @CreateDateColumn()
   createdAt!: Date;
 

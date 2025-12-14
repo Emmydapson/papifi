@@ -55,6 +55,21 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/create-usd/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const user = await userRepo.findOne({ where: { id: userId } });
+    if (!user) return res.status(404).json({ ok: false, message: 'User not found' });
+
+    const usdAccountRequest = await mapleRadService.createUsdVirtualAccount(user.id);
+    return res.status(201).json({ ok: true, usdAccountRequest });
+  } catch (err: any) {
+    console.error('USD virtual account creation error:', err?.message || err);
+    return res.status(400).json({ ok: false, message: err?.message || 'error' });
+  }
+});
+
+
 
 // get wallet balances for user
 router.get('/balance/:userId', async (req: Request, res: Response) => {
@@ -192,18 +207,57 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
     const signature = req.headers[process.env.MAPLERAD_SIGNATURE_HEADER || 'x-maplerad-signature'] as string;
     const rawBody = req.body.toString();
 
-    if (!signature) {
-      return res.status(400).json({ ok: false, message: 'Missing signature header' });
-    }
+    if (!signature) return res.status(400).json({ ok: false, message: 'Missing signature header' });
 
     const isValid = mapleRadService.verifyWebhookSignature(signature, rawBody);
-    if (!isValid) {
-      return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
-    }
+    if (!isValid) return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
 
     const eventData = await mapleRadService.handleWebhook(rawBody);
-    // Optional: log or handle specific events here
-    console.log('Webhook event processed:', eventData);
+
+    if (!eventData) {
+      console.log("⚠️ Event data is undefined");
+      return res.status(200).json({ ok: true });
+    }
+
+    // -----------------------
+    // USD Virtual Account
+    // -----------------------
+    if (eventData.type === "USD_ACCOUNT_APPROVED" && eventData.customerId && eventData.accountId) {
+      const { customerId, accountId } = eventData;
+
+      const user = await userRepo.findOne({ where: { mapleradCustomerId: customerId } });
+      if (user) {
+        const wallet = await walletRepo.findOne({ where: { user: { id: user.id } } });
+        if (wallet) {
+          wallet.usdAccountId = accountId;
+          wallet.usdAccountStatus = "approved";
+          await walletRepo.save(wallet);
+        }
+      }
+
+      console.log("USD Account Approved & Stored:", accountId);
+    }
+
+    if (eventData.type === "USD_ACCOUNT_REJECTED" && eventData.reason) {
+      console.log("USD Account Rejected:", eventData.reason);
+    }
+
+    // -----------------------
+    // Deposits / Transactions
+    // -----------------------
+    if (eventData.type === "DEPOSIT_RECORDED" && typeof eventData.amount === "number" && eventData.currency) {
+      const { amount, currency } = eventData;
+
+      console.log(`Deposit recorded: ${amount} ${currency}`);
+      // optionally, store transactions here if not done in handleWebhook
+    }
+
+    // -----------------------
+    // Other Events
+    // -----------------------
+    if (eventData.type === "OTHER_EVENT") {
+      console.log("Unhandled Maplerad event:", eventData.event, eventData.data);
+    }
 
     return res.status(200).json({ ok: true });
   } catch (err: any) {
@@ -211,6 +265,5 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req: R
     return res.status(500).json({ ok: false, message: err?.message || 'Internal error' });
   }
 });
-
 
 export default router;

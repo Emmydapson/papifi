@@ -65,14 +65,16 @@ async webhook(req: Request, res: Response) {
     const secret = process.env.DOJAH_SECRET_KEY!;
 
     // ✅ Verify signature
-    const expected = crypto
-      .createHmac('sha256', secret)
-      .update(JSON.stringify(payload))
-      .digest('hex');
+    const raw = (req as any).rawBody;
+const expected = crypto
+  .createHmac('sha256', secret)
+  .update(raw)
+  .digest('hex');
 
-    if (signature !== expected) {
-      return res.status(401).json({ message: 'Invalid signature' });
-    }
+if (signature !== expected) {
+  return res.status(401).json({ message: 'Invalid signature' });
+}
+
 
     console.log('✅ Verified Dojah webhook:', payload);
 

@@ -6,6 +6,14 @@ const router = Router();
 
 router.post('/start', authMiddleware, KYCController.startVerification);
 router.get('/status', authMiddleware, KYCController.getUserKYCStatus);
-router.post('/', KYCController.webhook); // webhook from Dojah
+router.post(
+  '/', 
+  express.json({
+    verify: (req: any, res, buf) => {
+      req.rawBody = buf.toString();
+    }
+  }),
+  KYCController.webhook
+);
 
 export default router;

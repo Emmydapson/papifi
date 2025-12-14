@@ -6,6 +6,7 @@ import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
+import { WebhookEvent } from '../entities/WebhookEvent';
 
 /**
  * MapleRadService
@@ -130,9 +131,13 @@ export class MapleRadService {
     };
 
     // queue the request
-    const res: AxiosResponse = await this.queue.add(() =>
-      this.http.post(`${this.baseUrl}/customers`, payload, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.q(() =>
+  this.http.post(
+    `${this.baseUrl}/customers`,
+    payload,
+    { headers: this.getSecretHeaders() }
+  )
+);
 
     const customerId = res.data?.data?.id ?? res.data?.id;
     if (!customerId) throw new Error('Failed to create MapleRad customer');
@@ -144,14 +149,15 @@ export class MapleRadService {
   }
 
   async upgradeCustomerTier1(payload: unknown): Promise<any> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.patch(`${this.baseUrl}/customers/upgrade/tier1`, payload, { headers: this.getSecretHeaders() })
     );
     return res.data?.data ?? res.data;
   }
 
   async verifyBvn(bvn: string): Promise<any> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(
+() =>
       this.http.post(`${this.baseUrl}/identity/bvn`, { bvn }, { headers: this.getSecretHeaders() })
     );
     return res.data?.data ?? res.data;
@@ -174,7 +180,7 @@ export class MapleRadService {
   const payload = { customer_id: customerId, currency };
   let data: any;
   try {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.post(`${this.baseUrl}/issuing/virtual_accounts`, payload, { headers: this.getSecretHeaders() })
     );
     data = res.data?.data ?? res.data;
@@ -202,6 +208,104 @@ export class MapleRadService {
   return data;
 }
 
+async createUsdVirtualAccount(userId: string): Promise<any> {
+  const user = await this.userRepo.findOne({ where: { id: userId } });
+  if (!user) throw new Error('User not found');
+
+  const customerId = await this.ensureMapleRadCustomer(user.id);
+
+  const payload = {
+    customer_id: customerId,
+    meta: {
+      // Maplerad requires onboarding metadata
+      // adjust according to their docs
+      first_name: user.firstName,
+      last_name: user.lastName,
+      email: user.email,
+      country: 'NG', // or 'US' if you have users abroad
+    },
+  };
+
+  const res: AxiosResponse = await this.q(() =>
+    this.http.post(
+      `${this.baseUrl}/collections/virtual-account/usd`,
+      payload,
+      { headers: this.getSecretHeaders() }
+    )
+  );
+
+  const data = res.data?.data ?? res.data;
+
+  // data.reference means "account creation request started"
+  if (!data?.reference) {
+    throw new Error('USD account request did not return a reference');
+  }
+
+  return data;
+}
+
+async getUsdAccountRails(accountId: string): Promise<any> {
+  if (!accountId) throw new Error('USD Account ID is required');
+
+  const res: AxiosResponse = await this.q(() =>
+    this.http.get(
+      `${this.baseUrl}/collections/virtual-account/${accountId}/rails`,
+      { headers: this.getSecretHeaders() }
+    )
+  );
+
+  return res.data?.data ?? res.data;
+}
+
+async getUsdVirtualAccountById(id: string): Promise<any> {
+  if (!id) throw new Error('USD Virtual Account ID is required');
+
+  const res: AxiosResponse = await this.q(() =>
+    this.http.get(
+      `${this.baseUrl}/collections/virtual-account/${id}`,
+      { headers: this.getSecretHeaders() }
+    )
+  );
+
+  return res.data?.data ?? res.data;
+}
+
+async checkUsdAccountRequestStatus(reference: string): Promise<any> {
+  if (!reference) throw new Error('USD account reference is required');
+
+  const res: AxiosResponse = await this.q(() =>
+    this.http.get(
+      `${this.baseUrl}/collections/virtual-account/status/${reference}`,
+      { headers: this.getSecretHeaders() }
+    )
+  );
+
+  return res.data?.data ?? res.data;
+}
+
+
+  async fundCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
+    const scaled = Math.round(amount * 100);
+    const res: AxiosResponse = await this.q(() =>
+      this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaled }, { headers: this.getSecretHeaders() })
+    );
+
+    const data = res.data?.data ?? res.data;
+
+    // Update underlying wallet (if card -> wallet relation exists)
+    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
+    if (card && card.wallet) {
+      const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
+      if (wallet) {
+        const curr = this.getWalletBalance(wallet, currency);
+        this.setWalletBalance(wallet, currency, curr - amount);
+        await this.walletRepo.save(wallet);
+      }
+    }
+
+    return data;
+  }
+
   async createWithdrawal(
     userId: string,
     amount: number,
@@ -227,7 +331,7 @@ export class MapleRadService {
       },
     };
 
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() })
     );
 
@@ -273,7 +377,7 @@ export class MapleRadService {
     const payload: any = { customer_id: customerId, currency, type: 'VIRTUAL', auto_approve: true, brand };
     if (amount) payload.amount = Math.round(amount * 100); // Maplerad may expect smallest unit
 
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.post(`${this.baseUrl}/issuing`, payload, { headers: this.getSecretHeaders() })
     );
 
@@ -291,31 +395,11 @@ export class MapleRadService {
     return data;
   }
 
-  async fundCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
-    const scaled = Math.round(amount * 100);
-    const res: AxiosResponse = await this.queue.add(() =>
-      this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaled }, { headers: this.getSecretHeaders() })
-    );
-
-    const data = res.data?.data ?? res.data;
-
-    // Update underlying wallet (if card -> wallet relation exists)
-    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
-    if (card && card.wallet) {
-      const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
-      if (wallet) {
-        const curr = this.getWalletBalance(wallet, currency);
-        this.setWalletBalance(wallet, currency, curr - amount);
-        await this.walletRepo.save(wallet);
-      }
-    }
-
-    return data;
-  }
+  
 
   async withdrawFromCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
     const scaled = Math.round(amount * 100);
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaled }, { headers: this.getSecretHeaders() })
     );
 
@@ -336,14 +420,14 @@ export class MapleRadService {
   }
 
   async freezeCard(cardId: string): Promise<any> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.patch(`${this.baseUrl}/issuing/${cardId}/freeze`, {}, { headers: this.getSecretHeaders() })
     );
     return res.data ?? res;
   }
 
   async unfreezeCard(cardId: string): Promise<any> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.patch(`${this.baseUrl}/issuing/${cardId}/unfreeze`, {}, { headers: this.getSecretHeaders() })
     );
     return res.data ?? res;
@@ -353,7 +437,7 @@ export class MapleRadService {
    * BANKS / FX
    * ------------------------------- */
   async listBanks(country = 'NG', type = 'NUBAN', page = 1, pageSize = 100): Promise<any[]> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.get(`${this.baseUrl}/institutions`, {
         params: { country, type, page, page_size: pageSize },
         headers: this.getSecretHeaders(),
@@ -370,14 +454,14 @@ export class MapleRadService {
   }
 
   async getTransactions(customerId: string): Promise<any[]> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() })
     );
     return res.data?.data ?? [];
   }
 
   async getTransactionById(id: string): Promise<any> {
-    const res: AxiosResponse = await this.queue.add(() =>
+    const res: AxiosResponse = await this.q(() =>
       this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() })
     );
     return res.data?.data ?? res.data;
@@ -392,28 +476,174 @@ export class MapleRadService {
     return hash === signature;
   }
 
-  async handleWebhook(rawBody: string): Promise<{ type: string; userId: string; customerId: string } | any> {
-    const event = JSON.parse(rawBody);
-    const eventType = event?.type ?? event?.event_type;
-    const data = event?.data ?? event?.payload ?? {};
+ async handleWebhook(rawBody: string) {
+  let body: any;
+  try {
+    body = JSON.parse(rawBody);
+  } catch (err: any) {
+    console.error("❌ Invalid webhook payload:", err?.message ?? err);
+    return;
+  }
 
-    // Map possible variations in customer id key names
-    const customerId = data?.customerId ?? data?.customer_id ?? data?.id ?? data?.customer;
+  const eventId = body?.id; // Maplerad event ID
+  const event = body?.event;
+  const data = body?.data;
 
-    console.log('MapleRad webhook received:', eventType, data);
+  if (!eventId || !event) {
+    console.log("⚠️ Missing event ID or type in webhook payload, ignoring.");
+    return;
+  }
 
-    if (!customerId) {
-      // If no customer id in payload, return the raw event for manual handling
-      return { type: eventType, raw: event };
+  console.log("📩 Maplerad Webhook received:", event);
+
+  // Repositories
+  const eventRepo = AppDataSource.getRepository(WebhookEvent);
+  const userRepo = this.userRepo;
+  const walletRepo = this.walletRepo;
+  const txRepo = this.txRepo;
+
+  // 🔒 Idempotency check
+  const existing = await eventRepo.findOne({ where: { id: eventId } });
+  if (existing) {
+    console.log("⏳ Duplicate webhook ignored:", eventId);
+    return;
+  }
+
+  // Record event before processing
+  await eventRepo.save(eventRepo.create({ id: eventId, type: event }));
+
+  try {
+    /** -------------------------
+     * DEPOSIT EVENTS
+     * ------------------------- */
+    if (event === "transaction.success" || event === "collections.virtual_account.deposit") {
+      const amount = Number(data?.amount) / 100; // cents → units
+      const currency = data?.currency;
+      const customerId = data?.customer_id;
+
+      if (!customerId || !amount || !currency) {
+        console.log("⚠️ Missing fields in deposit webhook");
+        return;
+      }
+
+      // find user
+      const user = await userRepo.findOne({ where: { mapleradCustomerId: customerId } });
+      if (!user) {
+        console.log("⚠️ Deposit webhook received for unknown customer:", customerId);
+        return;
+      }
+
+      // find wallet
+      const wallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
+      if (!wallet) {
+        console.log("⚠️ Wallet not found for currency", currency);
+        return;
+      }
+
+      const cur = this.getWalletBalance(wallet, currency);
+      this.setWalletBalance(wallet, currency, cur + amount);
+      await walletRepo.save(wallet);
+
+      // store transaction
+      // store transaction
+await this.txRepo.save(
+  this.txRepo.create({
+    user, // ✅ correct
+    amount,
+    currency,
+    type: "deposit",
+    status: "success", // ✅ must match TransactionStatus
+    reference: data?.reference ?? data?.id,
+    description: "Deposit via Maplerad virtual account",
+  })
+);
+
+
+      return { type: "DEPOSIT_RECORDED", amount, currency };
     }
 
-    const user = await this.userRepo.findOne({ where: { mapleradCustomerId: customerId } });
-    if (!user) throw new Error('User not found for MapleRad customer');
+    /** -------------------------
+     * USD ACCOUNT APPROVAL
+     * ------------------------- */
+    if (event === "virtual_account.request.approved") {
+      const accountId = data?.id;
+      const reference = data?.reference;
 
-    // further event-specific handling may be added here...
+      if (!accountId || !reference) {
+        console.log("⚠️ Missing accountId or reference in USD account approval");
+        return;
+      }
 
-    return { type: eventType, userId: user.id, customerId };
+      // Re-query Maplerad for verification
+      const verified = await this.verifyVirtualAccount(accountId);
+      if (!verified || verified.status !== "approved") {
+        console.log("❌ Re-query verification failed for USD Account:", accountId);
+        return;
+      }
+
+      return {
+        type: "USD_ACCOUNT_APPROVED",
+        reference,
+        accountId,
+        customerId: verified.customer_id,
+      };
+    }
+
+    if (event === "virtual_account.request.rejected") {
+      return {
+        type: "USD_ACCOUNT_REJECTED",
+        reason: data?.reason ?? "Unknown",
+      };
+    }
+
+    /** -------------------------
+     * CARD EVENTS
+     * ------------------------- */
+    if (event.startsWith("issuing.card")) {
+      // Example: issing.card.funded / issuing.card.withdrawn / issuing.card.frozen
+      console.log("💳 Card event received:", event);
+      // optionally: update VirtualCard or Wallet balances
+      return { type: "CARD_EVENT", event, data };
+    }
+
+    /** -------------------------
+     * TRANSFER / WITHDRAWAL EVENTS
+     * ------------------------- */
+    if (event.startsWith("transfer")) {
+      console.log("💸 Transfer event received:", event);
+      // optionally: update Transaction status
+      return { type: "TRANSFER_EVENT", event, data };
+    }
+
+    /** -------------------------
+     * OTHER EVENTS
+     * ------------------------- */
+    console.log("ℹ️ Other Maplerad event:", event);
+    return { type: "OTHER_EVENT", event, data };
+  } catch (err: any) {
+    console.error("❌ Error processing webhook:", err?.message ?? err);
+    return;
   }
+}
+
+/** -------------------------
+ * Verify Virtual Account (full URL + headers)
+ * ------------------------- */
+async verifyVirtualAccount(accountId: string) {
+  try {
+    const res: AxiosResponse = await this.http.get(
+      `${this.baseUrl}/collections/virtual-account/${accountId}`,
+      { headers: this.getSecretHeaders() }
+    );
+    return res.data?.data ?? null;
+  } catch (e: any) {
+    console.error("Error verifying virtual account:", e?.message ?? e);
+    return null;
+  }
+}
+
+
+
 
   /* ---------------------------------------------
    * Get Virtual Card Transactions (non-queued)
