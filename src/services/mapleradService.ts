@@ -66,7 +66,7 @@ export class MapleRadService {
 
   private getSecretHeaders() {
     return {
-      Authorization: `Bearer ${this.secretKey}`,
+      Authorization: this.secretKey!,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
@@ -74,7 +74,7 @@ export class MapleRadService {
 
   private getPublicHeaders() {
     return {
-      Authorization: `Bearer ${this.publicKey}`,
+      Authorization: this.publicKey!,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
