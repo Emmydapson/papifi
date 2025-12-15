@@ -49,7 +49,7 @@
     "express-session": "^1.18.0",
     "jsonwebtoken": "^9.0.2",
     "nodemailer": "^6.9.15",
-    "p-queue": "^6.6.2",
+    "p-queue": "^7.4.1",
     "p-timeout": "^4.1.0",
     "papafi-backend": "file:",
     "pg": "^8.13.0",
