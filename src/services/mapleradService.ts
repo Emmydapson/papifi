@@ -19,16 +19,7 @@ import { WebhookEvent } from '../entities/WebhookEvent';
  * - Wallet currency reads/writes use helpers to avoid TS index signature issues
  */
 
- type PQueueType = any;
-let PQueue: PQueueType;
-
-async function loadPQueue() {
-  if (!PQueue) {
-    const mod = await import('p-queue');
-    PQueue = mod.default ?? mod;
-  }
-}
-
+ 
 export class MapleRadService {
   private readonly baseUrl = process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1';
   private readonly secretKey = process.env.MAPLERAD_SECRET || process.env.MAPLERAD_SECRET_KEY;
@@ -42,7 +33,7 @@ export class MapleRadService {
   private cardRepo = AppDataSource.getRepository(VirtualCard);
 
   private http: AxiosInstance;
-  private queue: any;
+ 
 
   constructor() {
     this.http = axios.create();
@@ -64,26 +55,14 @@ export class MapleRadService {
       }
     );
 
-    // queue loads asynchronously
-    this.queue = null;
-
-    // load p-queue lazily
-    loadPQueue().then(() => {
-      this.queue = new PQueue({
-        interval: 500,
-        intervalCap: 2,
-      });
-    });
+    
   }
 
   getProviderName(): string {
     return 'MapleRad';
   }
 
-  private async q<T>(fn: () => Promise<T>): Promise<T> {
-    if (!this.queue) await loadPQueue();
-    return this.queue.add(fn);
-  }
+  
 
   private getSecretHeaders() {
     return {
@@ -131,13 +110,12 @@ export class MapleRadService {
     };
 
     // queue the request
-    const res: AxiosResponse = await this.q(() =>
-  this.http.post(
+    const res: AxiosResponse = await this.http.post(
     `${this.baseUrl}/customers`,
     payload,
     { headers: this.getSecretHeaders() }
-  )
-);
+  );
+
 
     const customerId = res.data?.data?.id ?? res.data?.id;
     if (!customerId) throw new Error('Failed to create MapleRad customer');
@@ -149,17 +127,14 @@ export class MapleRadService {
   }
 
   async upgradeCustomerTier1(payload: unknown): Promise<any> {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.patch(`${this.baseUrl}/customers/upgrade/tier1`, payload, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.patch(`${this.baseUrl}/customers/upgrade/tier1`, payload, { headers: this.getSecretHeaders() })
+    
     return res.data?.data ?? res.data;
   }
 
   async verifyBvn(bvn: string): Promise<any> {
-    const res: AxiosResponse = await this.q(
-() =>
-      this.http.post(`${this.baseUrl}/identity/bvn`, { bvn }, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/identity/bvn`, { bvn }, { headers: this.getSecretHeaders() })
+
     return res.data?.data ?? res.data;
   }
 
@@ -180,9 +155,8 @@ export class MapleRadService {
   const payload = { customer_id: customerId, currency };
   let data: any;
   try {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.post(`${this.baseUrl}/issuing/virtual_accounts`, payload, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/virtual_accounts`, payload, { headers: this.getSecretHeaders() })
+    
     data = res.data?.data ?? res.data;
   } catch (err: any) {
     throw new Error(`MapleRad Error: Failed to call virtual_accounts endpoint - ${err.message}`);
@@ -226,13 +200,12 @@ async createUsdVirtualAccount(userId: string): Promise<any> {
     },
   };
 
-  const res: AxiosResponse = await this.q(() =>
-    this.http.post(
+  const res: AxiosResponse = await this.http.post(
       `${this.baseUrl}/collections/virtual-account/usd`,
       payload,
       { headers: this.getSecretHeaders() }
     )
-  );
+  
 
   const data = res.data?.data ?? res.data;
 
@@ -247,12 +220,11 @@ async createUsdVirtualAccount(userId: string): Promise<any> {
 async getUsdAccountRails(accountId: string): Promise<any> {
   if (!accountId) throw new Error('USD Account ID is required');
 
-  const res: AxiosResponse = await this.q(() =>
-    this.http.get(
+  const res: AxiosResponse = await this.http.get(
       `${this.baseUrl}/collections/virtual-account/${accountId}/rails`,
       { headers: this.getSecretHeaders() }
     )
-  );
+  
 
   return res.data?.data ?? res.data;
 }
@@ -260,12 +232,11 @@ async getUsdAccountRails(accountId: string): Promise<any> {
 async getUsdVirtualAccountById(id: string): Promise<any> {
   if (!id) throw new Error('USD Virtual Account ID is required');
 
-  const res: AxiosResponse = await this.q(() =>
-    this.http.get(
+  const res: AxiosResponse = await this.http.get(
       `${this.baseUrl}/collections/virtual-account/${id}`,
       { headers: this.getSecretHeaders() }
     )
-  );
+  
 
   return res.data?.data ?? res.data;
 }
@@ -273,12 +244,11 @@ async getUsdVirtualAccountById(id: string): Promise<any> {
 async checkUsdAccountRequestStatus(reference: string): Promise<any> {
   if (!reference) throw new Error('USD account reference is required');
 
-  const res: AxiosResponse = await this.q(() =>
-    this.http.get(
+  const res: AxiosResponse = await this.http.get(
       `${this.baseUrl}/collections/virtual-account/status/${reference}`,
       { headers: this.getSecretHeaders() }
     )
-  );
+  
 
   return res.data?.data ?? res.data;
 }
@@ -286,9 +256,8 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
 
   async fundCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
     const scaled = Math.round(amount * 100);
-    const res: AxiosResponse = await this.q(() =>
-      this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaled }, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaled }, { headers: this.getSecretHeaders() })
+    
 
     const data = res.data?.data ?? res.data;
 
@@ -331,9 +300,8 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
       },
     };
 
-    const res: AxiosResponse = await this.q(() =>
-      this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/transfers`, payload, { headers: this.getSecretHeaders() })
+    
 
     const data = res.data?.data ?? res.data;
 
@@ -377,9 +345,8 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
     const payload: any = { customer_id: customerId, currency, type: 'VIRTUAL', auto_approve: true, brand };
     if (amount) payload.amount = Math.round(amount * 100); // Maplerad may expect smallest unit
 
-    const res: AxiosResponse = await this.q(() =>
-      this.http.post(`${this.baseUrl}/issuing`, payload, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing`, payload, { headers: this.getSecretHeaders() })
+    
 
     const data = res.data?.data ?? res.data;
 
@@ -399,9 +366,8 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
 
   async withdrawFromCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
     const scaled = Math.round(amount * 100);
-    const res: AxiosResponse = await this.q(() =>
-      this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaled }, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaled }, { headers: this.getSecretHeaders() })
+    
 
     const data = res.data?.data ?? res.data;
 
@@ -420,16 +386,14 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
   }
 
   async freezeCard(cardId: string): Promise<any> {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.patch(`${this.baseUrl}/issuing/${cardId}/freeze`, {}, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.patch(`${this.baseUrl}/issuing/${cardId}/freeze`, {}, { headers: this.getSecretHeaders() })
+    
     return res.data ?? res;
   }
 
   async unfreezeCard(cardId: string): Promise<any> {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.patch(`${this.baseUrl}/issuing/${cardId}/unfreeze`, {}, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.patch(`${this.baseUrl}/issuing/${cardId}/unfreeze`, {}, { headers: this.getSecretHeaders() })
+    
     return res.data ?? res;
   }
 
@@ -437,12 +401,11 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
    * BANKS / FX
    * ------------------------------- */
   async listBanks(country = 'NG', type = 'NUBAN', page = 1, pageSize = 100): Promise<any[]> {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.get(`${this.baseUrl}/institutions`, {
+    const res: AxiosResponse = await this.http.get(`${this.baseUrl}/institutions`, {
         params: { country, type, page, page_size: pageSize },
         headers: this.getSecretHeaders(),
       })
-    );
+    
     return res.data?.data ?? [];
   }
 
@@ -454,16 +417,14 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
   }
 
   async getTransactions(customerId: string): Promise<any[]> {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.get(`${this.baseUrl}/transactions?customer_id=${customerId}`, { headers: this.getSecretHeaders() })
+    
     return res.data?.data ?? [];
   }
 
   async getTransactionById(id: string): Promise<any> {
-    const res: AxiosResponse = await this.q(() =>
-      this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() })
-    );
+    const res: AxiosResponse = await this.http.get(`${this.baseUrl}/transactions/${id}`, { headers: this.getSecretHeaders() })
+    
     return res.data?.data ?? res.data;
   }
 
