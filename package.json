@@ -4,14 +4,15 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run build && node --test dist/tests",
     "dev": "tsc && nodemon dist/index.js",
     "start": "node dist/index.js",
     "clean": "tsc --build --clean",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
-    "migration:generate": "npm run build && npx typeorm migration:generate -d ./dist/database.js",
-    "migration:run": "npx typeorm migration:run -d ./dist/database.js",
-    "migration:revert": "npx typeorm migration:revert -d ./dist/database.js"
+    "migration:generate": "npm run build && typeorm migration:generate -d ./dist/database.js",
+    "migration:run": "typeorm migration:run -d ./dist/database.js",
+    "migration:revert": "typeorm migration:revert -d ./dist/database.js",
+    "migration:show": "typeorm migration:show -d ./dist/database.js"
   },
   "keywords": [],
   "author": "",
@@ -40,6 +41,7 @@
   },
   "dependencies": {
     "@types/dotenv": "^6.1.1",
+    "axios": "^1.17.0",
     "bcryptjs": "^2.4.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -51,7 +53,6 @@
     "nodemailer": "^6.9.15",
     "p-queue": "^7.4.1",
     "p-timeout": "^4.1.0",
-    "papafi-backend": "file:",
     "pg": "^8.13.0",
     "reflect-metadata": "^0.2.2",
     "twilio": "^5.2.3",

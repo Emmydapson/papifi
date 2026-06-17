@@ -1,0 +1,316 @@
+openapi: 3.0.3
+info:
+  title: Papafi Backend API
+  version: 1.0.0
+  description: Papafi wallet backend API with JWT auth, Maplerad BVN KYC, wallet ledger, risk controls, and reconciliation.
+servers:
+  - url: http://localhost:5000
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+      description: Required for withdrawals, transfers, card funding, and card withdrawal retries.
+    MapleradSignature:
+      name: x-maplerad-signature
+      in: header
+      required: true
+      schema:
+        type: string
+      description: HMAC signature over the raw request body. Header name is configurable with MAPLERAD_SIGNATURE_HEADER.
+paths:
+  /health:
+    get:
+      security: []
+      summary: Liveness check.
+      responses:
+        "200":
+          description: Process is running.
+  /ready:
+    get:
+      security: []
+      summary: Readiness check.
+      responses:
+        "200":
+          description: Database is reachable.
+        "503":
+          description: Application is not ready.
+  /api/auth/register:
+    post:
+      security: []
+      summary: Register a user and issue account verification OTP.
+      responses:
+        "201":
+          description: User created.
+  /api/auth/login:
+    post:
+      security: []
+      summary: Login with email/password.
+      responses:
+        "200":
+          description: JWT issued.
+  /api/auth/forgot-password:
+    post:
+      security: []
+      summary: Request a password reset OTP without revealing account existence.
+      responses:
+        "200":
+          description: Generic reset response.
+  /api/auth/reset-password:
+    post:
+      security: []
+      summary: Reset password with a valid password_reset OTP.
+      responses:
+        "200":
+          description: Password reset.
+  /api/auth/create-pin:
+    post:
+      summary: Create or update the authenticated user's transaction PIN.
+      responses:
+        "200":
+          description: PIN updated.
+  /api/auth/make-admin:
+    post:
+      summary: Super-admin only grant admin role to a user.
+      responses:
+        "200":
+          description: User promoted to admin.
+        "403":
+          description: Super admin required.
+  /api/auth/remove-admin:
+    post:
+      summary: Super-admin only remove admin role from a user.
+      responses:
+        "200":
+          description: Admin rights removed.
+        "403":
+          description: Super admin required.
+  /api/profile:
+    get:
+      summary: Get authenticated user's profile.
+      responses:
+        "200":
+          description: Profile returned.
+    put:
+      summary: Update authenticated user's profile.
+      responses:
+        "200":
+          description: Profile updated.
+  /api/profile/change-password:
+    put:
+      summary: Change authenticated user's password.
+      responses:
+        "200":
+          description: Password changed.
+  /api/kyc/start:
+    post:
+      summary: Start KYC guidance flow for authenticated user.
+      responses:
+        "200":
+          description: KYC flow instructions.
+  /api/kyc/bvn:
+    post:
+      summary: Verify BVN through Maplerad.
+      responses:
+        "200":
+          description: BVN verification result.
+  /api/kyc/documents:
+    post:
+      summary: Submit document metadata for NIN, driver's license, international passport, or voter's card.
+      responses:
+        "200":
+          description: Document metadata stored.
+  /api/kyc/status:
+    get:
+      summary: Get authenticated user's KYC status.
+      responses:
+        "200":
+          description: KYC status returned.
+  /api/wallet/create/{userId}:
+    post:
+      summary: Create NGN wallet/virtual account for the authenticated user.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Wallet created.
+  /api/wallet/create-usd/{userId}:
+    post:
+      summary: Request USD wallet/virtual account for the authenticated user.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: USD account request created.
+  /api/wallet/balance/{userId}:
+    get:
+      summary: List authenticated user's wallets and balances.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Wallet balances.
+  /api/wallet/withdraw:
+    post:
+      summary: Place withdrawal hold and submit provider withdrawal.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Withdrawal submitted or duplicate retry returned.
+  /api/transaction/log:
+    post:
+      summary: Transfer funds between wallets atomically.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Transfer completed or duplicate retry returned.
+  /api/transaction:
+    get:
+      summary: List authenticated user's wallet and card transactions.
+      parameters:
+        - name: walletId
+          in: query
+          schema:
+            type: string
+        - name: cardId
+          in: query
+          schema:
+            type: string
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [sent, received]
+        - name: startDate
+          in: query
+          schema:
+            type: string
+        - name: endDate
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction list returned.
+  /api/wallet/cards/create:
+    post:
+      summary: Create virtual card without persisting PAN/CVV.
+      responses:
+        "200":
+          description: Safe card metadata.
+  /api/wallet/cards/{id}/fund:
+    post:
+      summary: Fund a virtual card using a ledger hold.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Card funding submitted.
+  /api/wallet/cards/{id}/withdraw:
+    post:
+      summary: Withdraw funds from a virtual card and credit wallet.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Card withdrawal credited.
+  /api/wallet/cards/{id}/freeze:
+    post:
+      summary: Freeze an owned virtual card.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Card frozen.
+  /api/wallet/cards/{id}/unfreeze:
+    post:
+      summary: Unfreeze an owned virtual card.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Card unfrozen.
+  /api/wallet/webhook:
+    post:
+      security: []
+      summary: Maplerad webhook endpoint.
+      parameters:
+        - $ref: "#/components/parameters/MapleradSignature"
+      responses:
+        "200":
+          description: Webhook accepted, ignored, or duplicate no-op.
+        "401":
+          description: Invalid webhook signature.
+  /api/admin/audit-logs:
+    get:
+      summary: Admin-only audit log list.
+      responses:
+        "200":
+          description: Paginated sanitized audit logs.
+  /api/admin/risk-flags:
+    get:
+      summary: Admin-only open risk flags.
+      responses:
+        "200":
+          description: Paginated sanitized risk flags.
+  /api/admin/reconciliation:
+    get:
+      summary: Admin-only stale provider transaction queue.
+      responses:
+        "200":
+          description: Safe transaction reconciliation list.
+  /api/admin/transactions/{id}/manual-review:
+    post:
+      summary: Admin-only mark transaction for manual review.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transaction marked for manual review.

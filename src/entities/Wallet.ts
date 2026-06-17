@@ -58,6 +58,15 @@ usdAccountStatus: "pending" | "approved" | "rejected";
   @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
   balance!: number;
 
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+  availableBalance!: number;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+  pendingBalance!: number;
+
+  @Column({ type: 'decimal', precision: 18, scale: 2, default: 0 })
+  ledgerBalance!: number;
+
   /** Allow dynamic numeric access for currencies */
   [key: string]: any;
 }

@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { logger } from './logger';
 
 // Create a transporter object using SMTP transport
 const transporter = nodemailer.createTransport({
@@ -9,8 +10,8 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-  logger: true, // Enable this for detailed logs
-  debug: true,  // Enable this for detailed debugging outpu
+  logger: false,
+  debug: false,
   tls: {
     rejectUnauthorized: false, // Set to true if using self-signed certificates
   },
@@ -27,9 +28,9 @@ export const sendOTPEmail = async (email: string, otp: string) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log('OTP sent successfully to', email);
+    logger.info('otp_email_sent');
   } catch (error) {
-    console.error('Failed to send OTP email', error);
+    logger.error('otp_email_failed', error);
     throw new Error('Could not send OTP email');
   }
 };
@@ -45,9 +46,9 @@ export const sendPasswordChangeNotification = async (email: string) => {
     };
 
     await transporter.sendMail(mailOptions);
-    console.log('Password change notification sent successfully to', email);
+    logger.info('password_change_notification_sent');
   } catch (error) {
-    console.error('Failed to send password change notification', error);
+    logger.error('password_change_notification_failed', error);
     throw new Error('Could not send password change notification');
   }
 };

@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { Request } from 'express';
 import session from 'express-session';
 import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes';
@@ -10,10 +10,18 @@ import pgSession from 'connect-pg-simple';
 import "reflect-metadata";
 import kycRoutes from './routes/kycRoutes';
 import transactionRoutes from './routes/transactionRoutes';
+import adminRoutes from './routes/adminRoutes';
+import { corsMiddleware } from './middlewares/corsMiddleware';
+import { errorHandler, notFoundHandler } from './middlewares/errorMiddleware';
+import { requestLogger } from './middlewares/requestLogger';
+import { validateEnv } from './config/env';
+import { logger } from './services/logger';
+import { startReconciliationWorker } from './workers/reconciliationWorker';
 
 
 
 dotenv.config();
+validateEnv();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
@@ -28,8 +36,16 @@ const pgPool = new Pool({
 const PgSessionStore = pgSession(session);
 
 
-// Use JSON middleware
-app.use(express.json());
+app.use(corsMiddleware);
+app.use(requestLogger);
+
+app.use(
+  express.json({
+    verify: (req: Request & { rawBody?: Buffer }, res, buf) => {
+      req.rawBody = buf;
+    },
+  })
+);
 
 // Initialize and use session middleware
 app.use(
@@ -38,11 +54,11 @@ app.use(
       pool: pgPool, 
      tableName: 'session', 
     }),
-    secret: process.env.SESSION_SECRET || 'fallback_secret_key', // Use a secret key from .env
+    secret: process.env.SESSION_SECRET || 'development_session_secret',
     resave: false, 
     saveUninitialized: false, 
     cookie: {
-      secure: process.env.NODE_ENV === 'development', // Set to true if using HTTPS
+      secure: process.env.NODE_ENV === 'production',
       maxAge: 1000 * 60 * 60 * 24,
       httpOnly: true, 
     },
@@ -56,6 +72,15 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+app.get('/ready', async (req, res) => {
+  if (!AppDataSource.isInitialized) return res.status(503).json({ status: 'not_ready' });
+  try {
+    await AppDataSource.query('SELECT 1');
+    return res.json({ status: 'ready' });
+  } catch {
+    return res.status(503).json({ status: 'not_ready' });
+  }
+});
 
 
 // Use routes after initializing session middleware
@@ -64,19 +89,23 @@ app.use('/api', walletRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/kyc', kycRoutes);
 app.use('/api', transactionRoutes);
+app.use('/api/admin', adminRoutes);
 
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 
 
 // Initialize the data source and start the server
 AppDataSource.initialize()
   .then(() => {
+    startReconciliationWorker();
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on http://0.0.0.0:${PORT}`);
+      logger.info('server_started', { host: '0.0.0.0', port: PORT });
     });
     
     
   })
   .catch((err) => {
-    console.error('Error during Data Source initialization:', err);
+    logger.error('datasource_initialization_failed', err);
   });

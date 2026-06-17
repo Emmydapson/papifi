@@ -1,7 +1,12 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
 import { User } from './User';
 
-export type KycType = 'NIN_SELFIE' | 'PHOTOID_SELFIE' | 'LIVENESS';
+export type KycType =
+  | 'BVN'
+  | 'NIN'
+  | 'DRIVERS_LICENSE'
+  | 'INTERNATIONAL_PASSPORT'
+  | 'VOTERS_CARD';
 
 export type KycStatus = 'PENDING' | 'PASSED' | 'FAILED';
 
@@ -23,7 +28,7 @@ export class KycVerification {
   confidence: number;
 
   @Column({ type: 'jsonb', nullable: true })
-  metadata: any; // full Dojah response stored here
+  metadata: any;
 
   @CreateDateColumn()
   createdAt: Date;

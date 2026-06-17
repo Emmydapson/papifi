@@ -1,5 +1,6 @@
 // src/services/zendeskService.ts
 import axios from 'axios';
+import { logger } from './logger';
 
 const ZENDESK_API_URL = 'https://your-zendesk-domain.zendesk.com/api/v2/tickets.json';
 const ZENDESK_EMAIL = process.env.ZENDESK_EMAIL;
@@ -31,7 +32,7 @@ export const createSupportTicket = async (userEmail: string, subject: string, de
     
     return response.data;
   } catch (error) {
-    console.error('Failed to create support ticket:', error);
+    logger.error('support_ticket_create_failed', error);
     throw new Error('Failed to create support ticket');
   }
 };

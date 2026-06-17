@@ -20,14 +20,17 @@ export class VirtualCard {
   @Column({ nullable: true })
   mapleradCardId?: string; // Maplerad card reference
 
-  @Column()
-  cardNumber!: string;
+  @Column({ nullable: true })
+  cardNumber?: string;
 
-  @Column()
-  cvv!: string;
+  @Column({ nullable: true })
+  cvv?: string;
 
-  @Column()
-  expirationDate!: string;
+  @Column({ nullable: true })
+  expirationDate?: string;
+
+  @Column({ nullable: true })
+  cardLast4?: string;
 
   @Column({ nullable: true })
   brand?: string; // e.g. VISA, MASTERCARD

@@ -11,22 +11,22 @@ import {
   makeAdmin, removeAdmin       // New import
 } from '../controllers/authController';
 import {authMiddleware} from '../middlewares/authMiddleware';
+import { authRateLimit, otpRateLimit, pinRateLimit } from '../middlewares/rateLimitMiddleware';
 
 const router = Router();
 
-router.post('/register', registerUser);
-router.post('/verify-otp', verifyOtp);
-router.post('/login', loginUser);
-router.post('/resend-otp', resendOtp);
-console.log('Resend OTP route hit');
-router.post('/create-pin', createTransactionPin);
+router.post('/register', authRateLimit, registerUser);
+router.post('/verify-otp', otpRateLimit, verifyOtp);
+router.post('/login', authRateLimit, loginUser);
+router.post('/resend-otp', otpRateLimit, resendOtp);
+router.post('/create-pin', authMiddleware, pinRateLimit, createTransactionPin);
 router.post('/make-admin', authMiddleware, makeAdmin); // Requires token
 router.post('/remove-admin', authMiddleware, removeAdmin);
 
 
 // New forgot password routes
-router.post('/forgot-password', requestPasswordReset); // Initiates password reset
-router.post('/reset-password', resetPassword);         // Completes password reset
-router.post('/reset-passwordOtp', verifyOtpForPasswordReset)
+router.post('/forgot-password', otpRateLimit, requestPasswordReset); // Initiates password reset
+router.post('/reset-password', otpRateLimit, resetPassword);         // Completes password reset
+router.post('/reset-passwordOtp', otpRateLimit, verifyOtpForPasswordReset)
 
 export default router;

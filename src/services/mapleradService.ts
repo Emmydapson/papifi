@@ -6,7 +6,7 @@ import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
-import { WebhookEvent } from '../entities/WebhookEvent';
+import { logger } from './logger';
 
 /**
  * MapleRadService
@@ -65,6 +65,7 @@ export class MapleRadService {
   
 
   private getSecretHeaders() {
+    if (!this.secretKey) throw new Error('Missing Maplerad secret key');
     return {
       Authorization: this.secretKey!,
       'Content-Type': 'application/json',
@@ -73,24 +74,12 @@ export class MapleRadService {
   }
 
   private getPublicHeaders() {
+    if (!this.publicKey) throw new Error('Missing Maplerad public key');
     return {
       Authorization: this.publicKey!,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
-  }
-
-  // Helper: read wallet balance field for a currency safely
-  private getWalletBalance(wallet: Wallet, currency: Currency): number {
-    // Wallet entity uses properties like NGN, USD, GBP (numbers).
-    // cast to any to avoid TS complaining about index signature on Wallet
-    const curVal = (wallet as any)[currency];
-    return typeof curVal === 'number' ? Number(curVal) : Number(curVal ?? 0);
-  }
-
-  // Helper: set wallet balance safely
-  private setWalletBalance(wallet: Wallet, currency: Currency, value: number) {
-    (wallet as any)[currency] = Number(value);
   }
 
   /** -------------------------------
@@ -255,22 +244,15 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
 
 
   async fundCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
+    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
+    if (!card?.wallet) throw new Error('Card not found');
+
+    const providerCardId = card.mapleradCardId || card.id;
     const scaled = Math.round(amount * 100);
-    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/${cardId}/fund`, { amount: scaled }, { headers: this.getSecretHeaders() })
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/${providerCardId}/fund`, { amount: scaled }, { headers: this.getSecretHeaders() })
     
 
     const data = res.data?.data ?? res.data;
-
-    // Update underlying wallet (if card -> wallet relation exists)
-    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
-    if (card && card.wallet) {
-      const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
-      if (wallet) {
-        const curr = this.getWalletBalance(wallet, currency);
-        this.setWalletBalance(wallet, currency, curr - amount);
-        await this.walletRepo.save(wallet);
-      }
-    }
 
     return data;
   }
@@ -305,25 +287,6 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
 
     const data = res.data?.data ?? res.data;
 
-    // store transaction record
-    const tx = new Transaction();
-    tx.user = user;
-    tx.amount = amount;
-    tx.currency = currency;
-    tx.type = 'withdrawal';
-    tx.status = data?.status ?? 'pending';
-    tx.reference = data?.reference ?? data?.id ?? undefined;
-    tx.description = description ?? 'Wallet withdrawal';
-    await this.txRepo.save(tx);
-
-    // update user's wallet (pick wallet with matching currency)
-    const wallet = await this.walletRepo.findOne({ where: { user: { id: user.id }, currency } });
-    if (wallet) {
-      const currBalance = this.getWalletBalance(wallet, currency);
-      this.setWalletBalance(wallet, currency, currBalance - amount);
-      await this.walletRepo.save(wallet);
-    }
-
     return data;
   }
 
@@ -350,37 +313,21 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
 
     const data = res.data?.data ?? res.data;
 
-    // Save virtual card entity
-    const card = new VirtualCard();
-    card.wallet = wallet;
-    card.cardNumber = data?.card_number ?? data?.cardNumber ?? undefined;
-    card.cvv = data?.cvv ?? data?.cvvCode ?? undefined;
-    card.expirationDate = data?.expiry ?? data?.expiration ?? undefined;
-    // other fields if available...
-    await this.cardRepo.save(card);
-
     return data;
   }
 
   
 
   async withdrawFromCard(cardId: string, amount: number, currency: Currency = 'USD'): Promise<any> {
+    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
+    if (!card?.wallet) throw new Error('Card not found');
+
+    const providerCardId = card.mapleradCardId || card.id;
     const scaled = Math.round(amount * 100);
-    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/${cardId}/withdraw`, { amount: scaled }, { headers: this.getSecretHeaders() })
+    const res: AxiosResponse = await this.http.post(`${this.baseUrl}/issuing/${providerCardId}/withdraw`, { amount: scaled }, { headers: this.getSecretHeaders() })
     
 
     const data = res.data?.data ?? res.data;
-
-    // Update underlying wallet
-    const card = await this.cardRepo.findOne({ where: { id: cardId }, relations: ['wallet'] });
-    if (card && card.wallet) {
-      const wallet = await this.walletRepo.findOne({ where: { id: card.wallet.id } });
-      if (wallet) {
-        const curr = this.getWalletBalance(wallet, currency);
-        this.setWalletBalance(wallet, currency, curr - amount);
-        await this.walletRepo.save(wallet);
-      }
-    }
 
     return data;
   }
@@ -428,13 +375,25 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
     return res.data?.data ?? res.data;
   }
 
+  async getProviderTransactionStatus(reference: string): Promise<any | null> {
+    if (!reference) return null;
+    try {
+      return await this.getTransactionById(reference);
+    } catch (err: any) {
+      logger.warn('maplerad_transaction_status_unavailable', { providerReference: reference });
+      return null;
+    }
+  }
+
   /** -------------------------------
    * WEBHOOK
    * ------------------------------- */
   verifyWebhookSignature(signature: string, body: string): boolean {
     if (!this.webhookSecret) throw new Error('Missing MAPLERAD_WEBHOOK_SECRET');
     const hash = crypto.createHmac('sha512', this.webhookSecret).update(body).digest('hex');
-    return hash === signature;
+    const received = Buffer.from(signature, 'hex');
+    const expected = Buffer.from(hash, 'hex');
+    return received.length === expected.length && crypto.timingSafeEqual(received, expected);
   }
 
  async handleWebhook(rawBody: string) {
@@ -442,85 +401,36 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
   try {
     body = JSON.parse(rawBody);
   } catch (err: any) {
-    console.error("❌ Invalid webhook payload:", err?.message ?? err);
+    logger.warn('maplerad_webhook_invalid_payload');
     return;
   }
 
-  const eventId = body?.id; // Maplerad event ID
+  const eventId = body?.id;
   const event = body?.event;
   const data = body?.data;
+  const reference = data?.reference ?? data?.id ?? eventId;
 
-  if (!eventId || !event) {
-    console.log("⚠️ Missing event ID or type in webhook payload, ignoring.");
-    return;
-  }
-
-  console.log("📩 Maplerad Webhook received:", event);
-
-  // Repositories
-  const eventRepo = AppDataSource.getRepository(WebhookEvent);
-  const userRepo = this.userRepo;
-  const walletRepo = this.walletRepo;
-  const txRepo = this.txRepo;
-
-  // 🔒 Idempotency check
-  const existing = await eventRepo.findOne({ where: { id: eventId } });
-  if (existing) {
-    console.log("⏳ Duplicate webhook ignored:", eventId);
-    return;
-  }
-
-  // Record event before processing
-  await eventRepo.save(eventRepo.create({ id: eventId, type: event }));
+  if (!eventId || !event) return;
 
   try {
-    /** -------------------------
-     * DEPOSIT EVENTS
-     * ------------------------- */
     if (event === "transaction.success" || event === "collections.virtual_account.deposit") {
-      const amount = Number(data?.amount) / 100; // cents → units
+      const amount = Number(data?.amount) / 100;
       const currency = data?.currency;
       const customerId = data?.customer_id;
 
-      if (!customerId || !amount || !currency) {
-        console.log("⚠️ Missing fields in deposit webhook");
-        return;
-      }
+      if (!customerId || !amount || !currency) return;
 
-      // find user
-      const user = await userRepo.findOne({ where: { mapleradCustomerId: customerId } });
-      if (!user) {
-        console.log("⚠️ Deposit webhook received for unknown customer:", customerId);
-        return;
-      }
-
-      // find wallet
-      const wallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
-      if (!wallet) {
-        console.log("⚠️ Wallet not found for currency", currency);
-        return;
-      }
-
-      const cur = this.getWalletBalance(wallet, currency);
-      this.setWalletBalance(wallet, currency, cur + amount);
-      await walletRepo.save(wallet);
-
-      // store transaction
-      // store transaction
-await this.txRepo.save(
-  this.txRepo.create({
-    user, // ✅ correct
-    amount,
-    currency,
-    type: "deposit",
-    status: "success", // ✅ must match TransactionStatus
-    reference: data?.reference ?? data?.id,
-    description: "Deposit via Maplerad virtual account",
-  })
-);
-
-
-      return { type: "DEPOSIT_RECORDED", amount, currency };
+      return {
+        type: "DEPOSIT_RECORDED",
+        amount,
+        currency,
+        customerId,
+        reference,
+        providerStatus: data?.status,
+        providerPayload: data,
+        eventId,
+        event,
+      };
     }
 
     /** -------------------------
@@ -531,14 +441,14 @@ await this.txRepo.save(
       const reference = data?.reference;
 
       if (!accountId || !reference) {
-        console.log("⚠️ Missing accountId or reference in USD account approval");
+        logger.warn('maplerad_usd_account_approval_missing_reference', { eventId });
         return;
       }
 
       // Re-query Maplerad for verification
       const verified = await this.verifyVirtualAccount(accountId);
       if (!verified || verified.status !== "approved") {
-        console.log("❌ Re-query verification failed for USD Account:", accountId);
+        logger.warn('maplerad_usd_account_requery_failed', { eventId, accountId });
         return;
       }
 
@@ -547,6 +457,8 @@ await this.txRepo.save(
         reference,
         accountId,
         customerId: verified.customer_id,
+        eventId,
+        event,
       };
     }
 
@@ -554,6 +466,8 @@ await this.txRepo.save(
       return {
         type: "USD_ACCOUNT_REJECTED",
         reason: data?.reason ?? "Unknown",
+        eventId,
+        event,
       };
     }
 
@@ -562,27 +476,27 @@ await this.txRepo.save(
      * ------------------------- */
     if (event.startsWith("issuing.card")) {
       // Example: issing.card.funded / issuing.card.withdrawn / issuing.card.frozen
-      console.log("💳 Card event received:", event);
+      logger.info('maplerad_card_event_received', { eventId, event });
       // optionally: update VirtualCard or Wallet balances
-      return { type: "CARD_EVENT", event, data };
+      return { type: "CARD_EVENT", event, data, eventId, reference };
     }
 
     /** -------------------------
      * TRANSFER / WITHDRAWAL EVENTS
      * ------------------------- */
     if (event.startsWith("transfer")) {
-      console.log("💸 Transfer event received:", event);
+      logger.info('maplerad_transfer_event_received', { eventId, event });
       // optionally: update Transaction status
-      return { type: "TRANSFER_EVENT", event, data };
+      return { type: "TRANSFER_EVENT", event, data, eventId, reference };
     }
 
     /** -------------------------
      * OTHER EVENTS
      * ------------------------- */
-    console.log("ℹ️ Other Maplerad event:", event);
-    return { type: "OTHER_EVENT", event, data };
+    logger.info('maplerad_other_event_received', { eventId, event });
+    return { type: "OTHER_EVENT", event, data, eventId, reference };
   } catch (err: any) {
-    console.error("❌ Error processing webhook:", err?.message ?? err);
+    logger.error('maplerad_webhook_processing_failed', err, { eventId, event });
     return;
   }
 }
@@ -598,7 +512,7 @@ async verifyVirtualAccount(accountId: string) {
     );
     return res.data?.data ?? null;
   } catch (e: any) {
-    console.error("Error verifying virtual account:", e?.message ?? e);
+    logger.error('maplerad_virtual_account_verify_failed', e, { accountId });
     return null;
   }
 }
@@ -638,7 +552,7 @@ async verifyVirtualAccount(accountId: string) {
       } catch (err: any) {
         attempt++;
         const waitTime = Math.pow(2, attempt) * 300;
-        console.warn(`Maplerad card tx fetch failed (attempt ${attempt}):`, err?.message ?? err);
+        logger.warn('maplerad_card_transactions_fetch_retry', { cardId, attempt });
         if (attempt >= maxRetries) throw new Error('Failed to fetch Maplerad card transactions');
         // sleep
         await new Promise((r) => setTimeout(r, waitTime));

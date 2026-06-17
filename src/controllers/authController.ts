@@ -1,13 +1,31 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import jwt from 'jsonwebtoken';
 import { sendOTPEmail } from '../services/emailNotification';
+import { auditService } from '../services/auditService';
+import { logger } from '../services/logger';
 
 
 const OTP_EXPIRY_TIME = 5 * 60 * 1000; // 5 minutes
 const RESET_OTP_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
+const GENERIC_OTP_RESPONSE = 'If the account can receive this request, an OTP has been sent.';
+
+const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
+
+const hashOtp = (otp: string) => bcrypt.hash(otp, 10);
+
+const isOtpValid = async (
+  user: User,
+  otp: string,
+  purpose: 'account_verification' | 'password_reset'
+) => {
+  if (!user.otp || !user.otpExpiry || user.otpPurpose !== purpose) return false;
+  if (new Date() > user.otpExpiry) return false;
+  return bcrypt.compare(otp, user.otp);
+};
 
 
 // User Registration
@@ -23,13 +41,11 @@ export const registerUser = async (req: Request, res: Response) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = generateOtp();
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
-    console.log(`Attempting to send OTP to ${normalizedEmail}`);
     await sendOTPEmail(normalizedEmail, otp);
-    console.log(`OTP successfully sent to ${normalizedEmail}`);
 
     const user = new User();
     user.firstName = firstName;
@@ -38,21 +54,21 @@ export const registerUser = async (req: Request, res: Response) => {
     user.password = hashedPassword;
     user.gender = gender;
     user.phoneNumber = phoneNumber;
-    user.otp = otp;
+    user.otp = await hashOtp(otp);
     user.otpExpiry = otpExpiry;
+    user.otpPurpose = 'account_verification';
     user.isVerified = false;
 
     try {
       await userRepository.save(user);
-      console.log(`User saved successfully: ${normalizedEmail}`);
       res.status(200).json({ message: 'OTP sent to your email. Please verify to complete registration.' });
     } catch (error) {
-      console.error('Error occurred while saving user:', error);
+      logger.error('registration_user_save_failed', error, { requestId: (req as any).id });
       return res.status(500).json({ message: 'An error occurred while saving the user. Please try again later.' });
     }
 
   } catch (error) {
-    console.error('Error occurred during OTP sending:', error);
+    logger.error('registration_otp_send_failed', error, { requestId: (req as any).id });
     return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
@@ -69,19 +85,12 @@ export const verifyOtp = async (req: Request, res: Response) => {
   
   // Check if user exists
   if (!user) {
-      console.error('Verification attempt for non-existent user:', normalizedEmail);
+      logger.warn('otp_verification_user_not_found', { requestId: (req as any).id });
       return res.status(400).json({ message: 'User not found.' });
   }
 
-  // Check if OTP matches and is not expired
-  if (user.otp !== otp) {
-      console.error(`Invalid OTP for user ${normalizedEmail}. Expected: ${user.otp}, Provided: ${otp}`);
+  if (!(await isOtpValid(user, otp, 'account_verification'))) {
       return res.status(400).json({ message: 'Invalid OTP.' });
-  }
-
-  if (user.otpExpiry && new Date() > user.otpExpiry) {
-      console.error(`OTP expired for user ${normalizedEmail}. Current time: ${new Date()}, OTP expiry: ${user.otpExpiry}`);
-      return res.status(400).json({ message: 'OTP has expired.' });
   }
 
   try {
@@ -89,8 +98,9 @@ export const verifyOtp = async (req: Request, res: Response) => {
       user.isVerified = true;
       user.otp = null;
       user.otpExpiry = null;
+      user.otpPurpose = null;
       await userRepository.save(user);
-      console.log(`User ${normalizedEmail} successfully verified.`);
+      logger.info('account_verified', { requestId: (req as any).id, userId: user.id });
 
       // Generate JWT after verification
       const jwtSecret = process.env.JWT_SECRET;
@@ -101,7 +111,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
 
       res.status(200).json({ token, message: 'Account verified. Please create your transaction PIN.' });
   } catch (error) {
-      console.error('Failed to verify OTP:', error);
+      logger.error('otp_verification_failed', error, { requestId: (req as any).id });
       return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });
   }
 };
@@ -115,44 +125,45 @@ export const resendOtp = async (req: Request, res: Response) => {
   const user = await userRepository.findOne({ where: { email: normalizedEmail } });
 
   if (!user) {
-    return res.status(400).json({ message: 'No account found associated with this email address.' });
+    return res.status(200).json({ message: GENERIC_OTP_RESPONSE });
   }
 
   if (user.isVerified) {
     return res.status(400).json({ message: 'Your account is already verified. You can proceed to log in.' });
   }
 
-  const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+  const newOtp = generateOtp();
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
-    console.log(`Attempting to resend OTP to ${normalizedEmail}`);
     await sendOTPEmail(normalizedEmail, newOtp);
-    console.log(`OTP successfully resent to ${normalizedEmail}`);
 
-    user.otp = newOtp;
+    user.otp = await hashOtp(newOtp);
     user.otpExpiry = otpExpiry;
+    user.otpPurpose = 'account_verification';
     await userRepository.save(user);
-    console.log(`User ${normalizedEmail} updated with new OTP`);
 
     res.status(200).json({ message: 'A new OTP has been sent to your email. Please check and verify.' });
   } catch (error) {
-    console.error('Failed to resend OTP:', error);
+    logger.error('otp_resend_failed', error, { requestId: (req as any).id });
     return res.status(500).json({ message: 'An error occurred while sending the new OTP. Please try again later.' });
   }
 };
 
 // Create Transaction PIN
 export const createTransactionPin = async (req: Request, res: Response) => {
-  const { pin, email } = req.body; 
+  const { pin } = req.body; 
 
-  if (!pin || pin.length !== 4) {
+  if (!req.user?.id) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+
+  if (!pin || !/^\d{4}$/.test(pin)) {
     return res.status(400).json({ message: 'PIN must be a 4-digit number.' });
   }
 
   const userRepository = AppDataSource.getRepository(User);
-  const normalizedEmail = email.toLowerCase(); 
-  const user = await userRepository.findOne({ where: { email: normalizedEmail } });
+  const user = await userRepository.findOne({ where: { id: req.user.id } });
 
   if (!user) {
     return res.status(404).json({ message: 'User not found.' });
@@ -161,6 +172,7 @@ export const createTransactionPin = async (req: Request, res: Response) => {
   const hashedPin = await bcrypt.hash(pin, 10);
   user.transactionPin = hashedPin;
   await userRepository.save(user);
+  await auditService.log({ actorUserId: user.id, targetUserId: user.id, action: 'PIN_UPDATED', entityType: 'User', entityId: user.id, req });
 
   return res.status(200).json({ message: 'Transaction PIN set successfully.' });
 };
@@ -188,6 +200,7 @@ export const loginUser = async (req: Request, res: Response) => {
 
   // Include user id and email in JWT
   const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
+  await auditService.log({ actorUserId: user.id, targetUserId: user.id, action: 'LOGIN', entityType: 'User', entityId: user.id, req });
 
   // Return user id in response alongside token
   res.status(200).json({
@@ -206,22 +219,23 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 
   const user = await userRepository.findOne({ where: { email: normalizedEmail } });
   if (!user) {
-    return res.status(400).json({ message: 'No account found with this email address.' });
+    return res.status(200).json({ message: GENERIC_OTP_RESPONSE });
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otp = generateOtp();
   const otpExpiry = new Date(Date.now() + RESET_OTP_EXPIRY_TIME);
 
   try {
     await sendOTPEmail(normalizedEmail, otp);
 
-    user.otp = otp;
+    user.otp = await hashOtp(otp);
     user.otpExpiry = otpExpiry;
+    user.otpPurpose = 'password_reset';
     await userRepository.save(user);
 
-    res.status(200).json({ message: 'A password reset OTP has been sent to your email.' });
+    res.status(200).json({ message: GENERIC_OTP_RESPONSE });
   } catch (error) {
-    console.error('Failed to send password reset OTP:', error);
+    logger.error('password_reset_otp_send_failed', error, { requestId: (req as any).id });
     return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
   }
 };
@@ -236,18 +250,9 @@ export const verifyOtpForPasswordReset = async (req: Request, res: Response) => 
     return res.status(400).json({ message: 'No account found with this email address.' });
   }
 
-  if (user.otp !== otp) {
+  if (!(await isOtpValid(user, otp, 'password_reset'))) {
     return res.status(400).json({ message: 'Invalid OTP.' });
   }
-
-  if (user.otpExpiry && new Date() > user.otpExpiry) {
-    return res.status(400).json({ message: 'OTP has expired.' });
-  }
-
-  // Mark OTP as verified
-  user.otp = null; // Clear the OTP after verification
-  user.otpExpiry = null; // Clear OTP expiry
-  await userRepository.save(user);
 
   res.status(200).json({ message: 'OTP verified successfully. You can now reset your password.' });
 };
@@ -256,7 +261,7 @@ export const verifyOtpForPasswordReset = async (req: Request, res: Response) => 
 
 // Reset Password
 export const resetPassword = async (req: Request, res: Response) => {
-  const { email, newPassword } = req.body;
+  const { email, otp, newPassword } = req.body;
   const userRepository = AppDataSource.getRepository(User);
   const normalizedEmail = email.toLowerCase();
 
@@ -265,13 +270,17 @@ export const resetPassword = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'No account found with this email address.' });
   }
 
-  if (user.otp || user.otpExpiry) {
-    return res.status(400).json({ message: 'OTP verification is required before resetting the password.' });
+  if (!otp || !(await isOtpValid(user, otp, 'password_reset'))) {
+    return res.status(400).json({ message: 'A valid password reset OTP is required.' });
   }
 
   const hashedPassword = await bcrypt.hash(newPassword, 10);
   user.password = hashedPassword;
+  user.otp = null;
+  user.otpExpiry = null;
+  user.otpPurpose = null;
   await userRepository.save(user);
+  await auditService.log({ actorUserId: user.id, targetUserId: user.id, action: 'PASSWORD_RESET', entityType: 'User', entityId: user.id, req });
 
   res.status(200).json({ message: 'Password reset successful. You can now log in with your new password.' });
 };
@@ -297,6 +306,7 @@ export const makeAdmin = async (req: Request, res: Response) => {
 
   user.role = 'admin';
   await userRepository.save(user);
+  await auditService.log({ actorUserId: requester.id, targetUserId: user.id, action: 'ADMIN_ROLE_GRANTED', entityType: 'User', entityId: user.id, req });
   res.status(200).json({ message: 'User role updated to admin.' });
 };
 export const removeAdmin = async (req: Request, res: Response) => {
@@ -323,6 +333,7 @@ export const removeAdmin = async (req: Request, res: Response) => {
   // Remove admin rights
   user.role = 'user';
   await userRepository.save(user);
+  await auditService.log({ actorUserId: requester.id, targetUserId: user.id, action: 'ADMIN_ROLE_REMOVED', entityType: 'User', entityId: user.id, req });
 
   res.status(200).json({ message: 'Admin rights removed successfully.' });
 };

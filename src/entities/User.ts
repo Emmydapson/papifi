@@ -47,6 +47,9 @@ export class User {
   @Column({ type: 'timestamp', nullable: true })
   otpExpiry: Date | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  otpPurpose?: 'account_verification' | 'password_reset' | null;
+
   @Column({ default: false })
   isVerified!: boolean;
 
@@ -62,6 +65,13 @@ export class User {
 
   @Column({ default: false })
   isKYCVerified!: boolean;
+
+  @Column({
+    type: 'enum',
+    enum: ['UNVERIFIED', 'BVN_VERIFIED', 'DOCUMENT_SUBMITTED', 'APPROVED'],
+    default: 'UNVERIFIED',
+  })
+  accountTier!: 'UNVERIFIED' | 'BVN_VERIFIED' | 'DOCUMENT_SUBMITTED' | 'APPROVED';
 
   
 

@@ -4,12 +4,12 @@ FILE: src/routes/walletRoutes.ts
 
 import { Router } from 'express';
 import { authMiddleware } from '../middlewares/authMiddleware';
-import walletController from '../controllers/walletController';
+import walletController, { mapleradWebhookHandler } from '../controllers/walletController';
+import { moneyMovementRateLimit } from '../middlewares/rateLimitMiddleware';
 
 const router = Router();
 
-// Mount all routes from walletController under /wallet
-// Apply authMiddleware to all routes
-router.use('/wallet', authMiddleware, walletController);
+router.post('/wallet/webhook', mapleradWebhookHandler);
+router.use('/wallet', authMiddleware, moneyMovementRateLimit, walletController);
 
 export default router;
