@@ -7,6 +7,7 @@
     "test": "npm run build && node --test dist/tests",
     "dev": "tsc && nodemon dist/index.js",
     "start": "node dist/index.js",
+    "smoke:staging": "ts-node scripts/staging-smoke-test.ts",
     "clean": "tsc --build --clean",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
     "migration:generate": "npm run build && typeorm migration:generate -d ./dist/database.js",
