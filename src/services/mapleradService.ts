@@ -21,7 +21,7 @@ import { logger } from './logger';
 
  
 export class MapleRadService {
-  private readonly baseUrl = process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1';
+  private readonly baseUrl = this.normalizeBaseUrl(process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1');
   private readonly secretKey = process.env.MAPLERAD_SECRET || process.env.MAPLERAD_SECRET_KEY;
   private readonly publicKey = process.env.MAPLERAD_PUBLIC || process.env.MAPLERAD_PUBLIC_KEY;
   private readonly webhookSecret = process.env.MAPLERAD_WEBHOOK_SECRET;
@@ -44,6 +44,14 @@ export class MapleRadService {
         const config = err?.config;
         if (!config) return Promise.reject(err);
 
+        if (err?.response?.status) {
+          logger.warn('maplerad_provider_request_failed', {
+            method: String(config.method || 'GET').toUpperCase(),
+            endpoint: this.endpointPath(config.url),
+            status: err.response.status,
+          });
+        }
+
         config.retryCount = config.retryCount || 0;
 
         if (config.retryCount < 2) {
@@ -62,12 +70,31 @@ export class MapleRadService {
     return 'MapleRad';
   }
 
-  
+  private normalizeBaseUrl(url: string) {
+    const trimmed = url.trim().replace(/\/+$/, '');
+    return trimmed.endsWith('/v1') ? trimmed : `${trimmed}/v1`;
+  }
+
+  private endpointPath(url?: string) {
+    if (!url) return 'unknown';
+    try {
+      return new URL(url).pathname;
+    } catch {
+      return url.replace(this.baseUrl, '') || url;
+    }
+  }
+
+  private providerErrorDetails(error: any) {
+    const status = error?.response?.status;
+    const endpoint = this.endpointPath(error?.config?.url);
+    if (status) return `${endpoint} returned ${status}`;
+    return error?.message || 'provider_error';
+  }
 
   private getSecretHeaders() {
     if (!this.secretKey) throw new Error('Missing Maplerad secret key');
     return {
-      Authorization: this.secretKey!,
+      Authorization: `Bearer ${this.secretKey!}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
@@ -76,7 +103,7 @@ export class MapleRadService {
   private getPublicHeaders() {
     if (!this.publicKey) throw new Error('Missing Maplerad public key');
     return {
-      Authorization: this.publicKey!,
+      Authorization: `Bearer ${this.publicKey!}`,
       'Content-Type': 'application/json',
       Accept: 'application/json',
     };
@@ -138,7 +165,7 @@ export class MapleRadService {
   try {
     customerId = await this.ensureMapleRadCustomer(user.id);
   } catch (err: any) {
-    throw new Error(`MapleRad Error: Failed to ensure customer for user ${user.id} - ${err.message}`);
+    throw new Error(`MapleRad Error: Failed to ensure customer for user ${user.id} - ${this.providerErrorDetails(err)}`);
   }
 
   const payload = { customer_id: customerId, currency };
@@ -148,7 +175,7 @@ export class MapleRadService {
     
     data = res.data?.data ?? res.data;
   } catch (err: any) {
-    throw new Error(`MapleRad Error: Failed to call virtual_accounts endpoint - ${err.message}`);
+    throw new Error(`MapleRad Error: Failed to call virtual_accounts endpoint - ${this.providerErrorDetails(err)}`);
   }
 
   if (!data?.account_number) {

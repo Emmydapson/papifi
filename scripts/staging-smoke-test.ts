@@ -31,7 +31,7 @@ const startedAt = Date.now();
 const runId = Date.now().toString(36);
 const emailDomain = process.env.SMOKE_TEST_EMAIL_DOMAIN || 'example.com';
 const testEmail = process.env.SMOKE_TEST_EMAIL || `papafi.smoke.${runId}@${emailDomain}`;
-const testPhone = process.env.SMOKE_TEST_PHONE || `+1555${String(Date.now()).slice(-10)}`;
+const testPhone = process.env.SMOKE_TEST_PHONE || `+234801234${String(Date.now()).slice(-4)}`;
 const results: StepResult[] = [];
 
 let authToken = tokenOverride || '';

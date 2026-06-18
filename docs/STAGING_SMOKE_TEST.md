@@ -19,7 +19,7 @@ This smoke test exercises deployed Papafi API endpoints from a frontend/mobile i
 | `TEST_USER_ID` | Required only when `TEST_USER_TOKEN` cannot be decoded locally. |
 | `SMOKE_TEST_EMAIL` | Overrides generated test email. |
 | `SMOKE_TEST_EMAIL_DOMAIN` | Domain for generated test emails. Defaults to `example.com`. |
-| `SMOKE_TEST_PHONE` | Overrides generated E.164 test phone number. |
+| `SMOKE_TEST_PHONE` | Overrides generated Nigerian E.164 test phone number. Must include country code, for example `+2348012340000`. |
 | `SMOKE_TEST_PASSWORD` | Overrides generated test password. Do not use a real user password. |
 | `SMOKE_TEST_PIN` | Overrides the test transaction PIN. Do not use a real user PIN. |
 | `MAPLERAD_SANDBOX_BVN` or `SMOKE_TEST_BVN` | Enables BVN KYC check with an explicit Maplerad sandbox/test identity. |
