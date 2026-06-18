@@ -13,6 +13,8 @@ This smoke test exercises deployed Papafi API endpoints from a frontend/mobile i
 | Env var | Purpose |
 | --- | --- |
 | `TEST_OTP`, `DEV_TEST_OTP`, or `SMOKE_TEST_OTP` | Automates account OTP verification when staging has a safe test OTP bypass. |
+| `ENABLE_TEST_OTP_BYPASS` | Backend-only staging/dev flag. Set to `true` outside production to bypass SMTP and use `TEST_OTP_CODE`. Defaults to disabled. |
+| `TEST_OTP_CODE` | Backend staging/dev OTP code used only when `ENABLE_TEST_OTP_BYPASS=true` and `NODE_ENV` is not `production`. The smoke test also reads this as an OTP input when provided. |
 | `TEST_USER_TOKEN` | Skips registration, OTP verification, and login; continues authenticated checks with an existing normal user token. |
 | `TEST_USER_ID` | Required only when `TEST_USER_TOKEN` cannot be decoded locally. |
 | `SMOKE_TEST_EMAIL` | Overrides generated test email. |
@@ -32,7 +34,8 @@ Against deployed staging:
 
 ```powershell
 $env:STAGING_BASE_URL = "https://api-staging.papifi.com"
-$env:TEST_OTP = "<safe-dev-otp-if-available>"
+$env:ENABLE_TEST_OTP_BYPASS = "true"
+$env:TEST_OTP_CODE = "<safe-dev-otp-code>"
 $env:MAPLERAD_SANDBOX_BVN = "<maplerad-sandbox-bvn>"
 $env:MAPLERAD_WEBHOOK_SECRET = "<staging-webhook-secret>"
 npm run smoke:staging
@@ -84,6 +87,16 @@ Then either:
 
 The script intentionally does not scrape email inboxes or print OTPs.
 
+For staging/dev environments without SMTP, configure the backend with:
+
+```text
+NODE_ENV=development
+ENABLE_TEST_OTP_BYPASS=true
+TEST_OTP_CODE=<safe-dev-otp-code>
+```
+
+The bypass is ignored when `NODE_ENV=production`. It is intended only for Papafi smoke tests and staging/dev verification.
+
 ## Covered Endpoints
 
 The script covers:
@@ -134,4 +147,3 @@ The smoke test does not:
 - Withdrawal is called without `Idempotency-Key` and is expected to fail before ledger/provider submission.
 - Tokens, OTPs, PINs, BVNs, account numbers, passwords, signatures, PANs, and CVVs are redacted from logs.
 - The script fails fast with endpoint, status code, and sanitized response when an unexpected result occurs.
-

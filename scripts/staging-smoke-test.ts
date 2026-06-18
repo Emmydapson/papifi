@@ -20,7 +20,7 @@ type SmokeResponse<T = any> = {
 const baseUrl = requiredEnv('STAGING_BASE_URL').replace(/\/+$/, '');
 const testPassword = process.env.SMOKE_TEST_PASSWORD || `Smoke-${crypto.randomUUID()}-Pass!`;
 const testPin = process.env.SMOKE_TEST_PIN || String(crypto.randomInt(1000, 10000));
-const testOtp = process.env.TEST_OTP || process.env.DEV_TEST_OTP || process.env.SMOKE_TEST_OTP;
+const testOtp = process.env.TEST_OTP || process.env.DEV_TEST_OTP || process.env.SMOKE_TEST_OTP || process.env.TEST_OTP_CODE;
 const tokenOverride = process.env.TEST_USER_TOKEN;
 const explicitUserId = process.env.TEST_USER_ID;
 const sandboxBvn = process.env.MAPLERAD_SANDBOX_BVN || process.env.SMOKE_TEST_BVN;

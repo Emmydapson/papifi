@@ -14,6 +14,18 @@ const RESET_OTP_EXPIRY_TIME = 10 * 60 * 1000; // 10 minutes
 const GENERIC_OTP_RESPONSE = 'If the account can receive this request, an OTP has been sent.';
 
 const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
+const isTestOtpBypassEnabled = () =>
+  process.env.NODE_ENV !== 'production' &&
+  process.env.ENABLE_TEST_OTP_BYPASS === 'true' &&
+  /^\d{6}$/.test(process.env.TEST_OTP_CODE || '');
+const getOtpCode = () => (isTestOtpBypassEnabled() ? process.env.TEST_OTP_CODE! : generateOtp());
+const sendOtpIfRequired = async (email: string, otp: string) => {
+  if (isTestOtpBypassEnabled()) {
+    logger.warn('test_otp_bypass_enabled_for_non_production');
+    return;
+  }
+  await sendOTPEmail(email, otp);
+};
 
 const hashOtp = (otp: string) => bcrypt.hash(otp, 10);
 
@@ -41,11 +53,11 @@ export const registerUser = async (req: Request, res: Response) => {
   }
 
   const hashedPassword = await bcrypt.hash(password, 10);
-  const otp = generateOtp();
+  const otp = getOtpCode();
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
-    await sendOTPEmail(normalizedEmail, otp);
+    await sendOtpIfRequired(normalizedEmail, otp);
 
     const user = new User();
     user.firstName = firstName;
@@ -132,11 +144,11 @@ export const resendOtp = async (req: Request, res: Response) => {
     return res.status(400).json({ message: 'Your account is already verified. You can proceed to log in.' });
   }
 
-  const newOtp = generateOtp();
+  const newOtp = getOtpCode();
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_TIME);
 
   try {
-    await sendOTPEmail(normalizedEmail, newOtp);
+    await sendOtpIfRequired(normalizedEmail, newOtp);
 
     user.otp = await hashOtp(newOtp);
     user.otpExpiry = otpExpiry;
@@ -222,11 +234,11 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     return res.status(200).json({ message: GENERIC_OTP_RESPONSE });
   }
 
-  const otp = generateOtp();
+  const otp = getOtpCode();
   const otpExpiry = new Date(Date.now() + RESET_OTP_EXPIRY_TIME);
 
   try {
-    await sendOTPEmail(normalizedEmail, otp);
+    await sendOtpIfRequired(normalizedEmail, otp);
 
     user.otp = await hashOtp(otp);
     user.otpExpiry = otpExpiry;
