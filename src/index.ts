@@ -17,6 +17,7 @@ import { requestLogger } from './middlewares/requestLogger';
 import { validateEnv } from './config/env';
 import { logger } from './services/logger';
 import { startReconciliationWorker } from './workers/reconciliationWorker';
+import { registerApiDocs } from './apiDocs';
 
 
 
@@ -82,6 +83,7 @@ app.get('/ready', async (req, res) => {
   }
 });
 
+registerApiDocs(app);
 
 // Use routes after initializing session middleware
 app.use('/api/auth', authRoutes);
@@ -103,8 +105,6 @@ AppDataSource.initialize()
     app.listen(PORT, '0.0.0.0', () => {
       logger.info('server_started', { host: '0.0.0.0', port: PORT });
     });
-    
-    
   })
   .catch((err) => {
     logger.error('datasource_initialization_failed', err);
