@@ -4,6 +4,7 @@ info:
   version: 1.0.0
   description: Papafi wallet backend API with JWT auth, Maplerad BVN KYC, wallet ledger, risk controls, and reconciliation.
 servers:
+  - url: https://api.papifi.com
   - url: http://localhost:5000
 security:
   - bearerAuth: []

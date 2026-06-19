@@ -6,9 +6,8 @@
     "description": "Papafi wallet backend API for frontend and mobile clients. Documents implemented Express routes only."
   },
   "servers": [
-    { "url": "https://api-staging.papifi.com" },
     { "url": "https://api.papifi.com" },
-    { "url": "http://localhost:3000" }
+    { "url": "http://localhost:5000" }
   ],
   "tags": [
     { "name": "Health" },
