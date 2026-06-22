@@ -53,6 +53,11 @@ test('GET /swagger.json serves the JSON API document', async () => {
   const document = await response.json() as {
     openapi?: string;
     servers?: Array<{ url?: string }>;
+    paths?: Record<string, Record<string, {
+      requestBody?: { content?: Record<string, { schema?: unknown; example?: unknown }> };
+      parameters?: Array<{ $ref?: string }> | { $ref?: string };
+      security?: Array<Record<string, unknown>>;
+    }>>;
   };
 
   assert.equal(response.status, 200);
@@ -62,6 +67,49 @@ test('GET /swagger.json serves the JSON API document', async () => {
     { url: 'https://api.papifi.com' },
     { url: 'http://localhost:5000' },
   ]);
+
+  const registerJson = document.paths?.['/api/auth/register']?.post
+    ?.requestBody?.content?.['application/json'];
+  assert.ok(registerJson?.schema);
+  assert.deepEqual(registerJson?.example, {
+    firstName: 'Ada',
+    lastName: 'Okafor',
+    email: 'ada.okafor@example.com',
+    password: 'DOCS_ONLY_PASSWORD',
+    gender: 'female',
+    phoneNumber: '+2348012345678',
+  });
+
+  for (const [route, pathItem] of Object.entries(document.paths ?? {})) {
+    for (const method of ['post', 'put', 'patch']) {
+      const operation = pathItem[method];
+      if (!operation) continue;
+      const jsonBody = operation.requestBody?.content?.['application/json'];
+      assert.ok(jsonBody?.schema, `${method.toUpperCase()} ${route} is missing its JSON request schema`);
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(jsonBody, 'example'),
+        `${method.toUpperCase()} ${route} is missing its JSON request example`,
+      );
+    }
+  }
+
+  const moneyMovementRoutes = [
+    '/api/wallet/withdraw',
+    '/api/wallet/cards/{id}/fund',
+    '/api/wallet/cards/{id}/withdraw',
+    '/api/transaction/log',
+  ];
+  for (const route of moneyMovementRoutes) {
+    const operation = document.paths?.[route]?.post;
+    const parameters = Array.isArray(operation?.parameters)
+      ? operation.parameters
+      : [operation?.parameters];
+    assert.ok(
+      parameters.some((parameter) => parameter?.$ref === '#/components/parameters/IdempotencyKey'),
+      `POST ${route} is missing the Idempotency-Key header`,
+    );
+    assert.deepEqual(operation?.security, [{ bearerAuth: [] }]);
+  }
 });
 
 test('GET /openapi.yaml serves the YAML API document', async () => {
@@ -69,6 +117,9 @@ test('GET /openapi.yaml serves the YAML API document', async () => {
   const body = await response.text();
   const document = YAML.parse(body) as {
     servers?: Array<{ url?: string }>;
+    paths?: Record<string, Record<string, {
+      requestBody?: { content?: Record<string, { schema?: unknown; example?: unknown }> };
+    }>>;
   };
 
   assert.equal(response.status, 200);
@@ -78,4 +129,8 @@ test('GET /openapi.yaml serves the YAML API document', async () => {
     { url: 'https://api.papifi.com' },
     { url: 'http://localhost:5000' },
   ]);
+  assert.ok(
+    document.paths?.['/api/auth/register']?.post
+      ?.requestBody?.content?.['application/json']?.schema,
+  );
 });

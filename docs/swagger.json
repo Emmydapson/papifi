@@ -6,24 +6,48 @@
     "description": "Papafi wallet backend API for frontend and mobile clients. Documents implemented Express routes only."
   },
   "servers": [
-    { "url": "https://api.papifi.com" },
-    { "url": "http://localhost:5000" }
+    {
+      "url": "https://api.papifi.com"
+    },
+    {
+      "url": "http://localhost:5000"
+    }
   ],
   "tags": [
-    { "name": "Health" },
-    { "name": "Auth" },
-    { "name": "Profile" },
-    { "name": "KYC" },
-    { "name": "Wallet" },
-    { "name": "Cards" },
-    { "name": "Transactions" },
-    { "name": "Admin" },
-    { "name": "Webhooks" }
+    {
+      "name": "Health"
+    },
+    {
+      "name": "Auth"
+    },
+    {
+      "name": "Profile"
+    },
+    {
+      "name": "KYC"
+    },
+    {
+      "name": "Wallet"
+    },
+    {
+      "name": "Cards"
+    },
+    {
+      "name": "Transactions"
+    },
+    {
+      "name": "Admin"
+    },
+    {
+      "name": "Webhooks"
+    }
   ],
   "paths": {
     "/": {
       "get": {
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "summary": "Root welcome endpoint",
         "security": [],
         "responses": {
@@ -31,7 +55,9 @@
             "description": "Welcome text.",
             "content": {
               "text/plain": {
-                "schema": { "type": "string" },
+                "schema": {
+                  "type": "string"
+                },
                 "example": "Welcome to the API!"
               }
             }
@@ -41,7 +67,9 @@
     },
     "/health": {
       "get": {
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "summary": "Liveness check",
         "security": [],
         "responses": {
@@ -49,8 +77,12 @@
             "description": "Process is running.",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/StatusResponse" },
-                "example": { "status": "ok" }
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                },
+                "example": {
+                  "status": "ok"
+                }
               }
             }
           }
@@ -59,523 +91,1500 @@
     },
     "/ready": {
       "get": {
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "summary": "Readiness check",
         "security": [],
         "responses": {
           "200": {
             "description": "Database is reachable.",
-            "content": { "application/json": { "example": { "status": "ready" } } }
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ready"
+                }
+              }
+            }
           },
           "503": {
             "description": "Application or database is not ready.",
-            "content": { "application/json": { "example": { "status": "not_ready" } } }
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "not_ready"
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/auth/register": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Register a user and send account verification OTP",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              },
+              "example": {
+                "firstName": "Ada",
+                "lastName": "Okafor",
+                "email": "ada.okafor@example.com",
+                "password": "DOCS_ONLY_PASSWORD",
+                "gender": "female",
+                "phoneNumber": "+2348012345678"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/RegisterOtpSent" },
-          "400": { "$ref": "#/components/responses/MessageError" },
-          "500": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/RegisterOtpSent"
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          },
+          "500": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/verify-otp": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Verify account OTP and issue JWT",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OtpVerifyRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyRequest"
+              },
+              "example": {
+                "email": "ada.okafor@example.com",
+                "otp": "000000"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "Account verified.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthTokenResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthTokenResponse"
+                }
+              }
+            }
           },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/login": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Login with email and password",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              },
+              "example": {
+                "email": "ada.okafor@example.com",
+                "password": "DOCS_ONLY_PASSWORD"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "JWT issued.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
           },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/resend-otp": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Resend account verification OTP",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmailRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              },
+              "example": {
+                "email": "ada.okafor@example.com"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/create-pin": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Create or update transaction PIN",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreatePinRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePinRequest"
+              },
+              "example": {
+                "pin": "0000"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "400": { "$ref": "#/components/responses/MessageError" },
-          "401": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          },
+          "401": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/make-admin": {
       "post": {
-        "tags": ["Auth", "Admin"],
+        "tags": [
+          "Auth",
+          "Admin"
+        ],
         "summary": "Grant admin role to a user",
         "description": "Authenticated route. Controller requires requester role to be super_admin.",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserIdRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdRequest"
+              },
+              "example": {
+                "userId": "11111111-1111-4111-8111-111111111111"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "403": { "$ref": "#/components/responses/MessageError" },
-          "404": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "403": {
+            "$ref": "#/components/responses/MessageError"
+          },
+          "404": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/remove-admin": {
       "post": {
-        "tags": ["Auth", "Admin"],
+        "tags": [
+          "Auth",
+          "Admin"
+        ],
         "summary": "Remove admin role from a user",
         "description": "Authenticated route. Controller requires requester role to be super_admin.",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserIdRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdRequest"
+              },
+              "example": {
+                "userId": "11111111-1111-4111-8111-111111111111"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "403": { "$ref": "#/components/responses/MessageError" },
-          "404": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "403": {
+            "$ref": "#/components/responses/MessageError"
+          },
+          "404": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/forgot-password": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Request password reset OTP",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmailRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              },
+              "example": {
+                "email": "ada.okafor@example.com"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
             "description": "Generic OTP response to avoid account enumeration.",
-            "content": { "application/json": { "example": { "message": "If the account can receive this request, an OTP has been sent." } } }
+            "content": {
+              "application/json": {
+                "example": {
+                  "message": "If the account can receive this request, an OTP has been sent."
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/auth/reset-password": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Reset password with password reset OTP",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              },
+              "example": {
+                "email": "ada.okafor@example.com",
+                "otp": "000000",
+                "newPassword": "DOCS_ONLY_NEW_PASSWORD"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/auth/reset-passwordOtp": {
       "post": {
-        "tags": ["Auth"],
+        "tags": [
+          "Auth"
+        ],
         "summary": "Verify password reset OTP without changing password",
         "security": [],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OtpVerifyRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OtpVerifyRequest"
+              },
+              "example": {
+                "email": "ada.okafor@example.com",
+                "otp": "000000"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/profile": {
       "get": {
-        "tags": ["Profile"],
+        "tags": [
+          "Profile"
+        ],
         "summary": "Get authenticated user's profile",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Profile returned.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Profile" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
           },
-          "401": { "$ref": "#/components/responses/MessageError" }
+          "401": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       },
       "put": {
-        "tags": ["Profile"],
+        "tags": [
+          "Profile"
+        ],
         "summary": "Update authenticated user's profile",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProfileUpdateRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileUpdateRequest"
+              },
+              "example": {
+                "gender": "female",
+                "phoneNumber": "+2348012345678",
+                "country": "NG",
+                "nationality": "Nigerian",
+                "dateOfBirth": "1995-04-12",
+                "address": "12 Example Road, Lagos"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Updated profile object." },
-          "401": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "description": "Updated profile object."
+          },
+          "401": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/profile/change-password": {
       "put": {
-        "tags": ["Profile"],
+        "tags": [
+          "Profile"
+        ],
         "summary": "Change authenticated user's password",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChangePasswordRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              },
+              "example": {
+                "currentPassword": "DOCS_ONLY_CURRENT_PASSWORD",
+                "newPassword": "DOCS_ONLY_NEW_PASSWORD"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/MessageOk" },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "$ref": "#/components/responses/MessageOk"
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/kyc/start": {
       "post": {
-        "tags": ["KYC"],
+        "tags": [
+          "KYC"
+        ],
         "summary": "Start KYC guidance flow",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "KYC provider and allowed documents.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycStartResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycStartResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "This operation does not consume input fields. Send an empty JSON object if a body is required by the client.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "maxProperties": 0
+              },
+              "example": {}
+            }
           }
         }
       }
     },
     "/api/kyc/bvn": {
       "post": {
-        "tags": ["KYC"],
+        "tags": [
+          "KYC"
+        ],
         "summary": "Verify BVN with Maplerad",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "description": "BVN is sent to the backend only. Do not log it in clients.",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BvnRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BvnRequest"
+              },
+              "example": {
+                "bvn": "00000000000"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "BVN verification result.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycResultResponse" } } } },
-          "400": { "$ref": "#/components/responses/MessageError" },
-          "502": { "$ref": "#/components/responses/MessageError" }
+          "200": {
+            "description": "BVN verification result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycResultResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          },
+          "502": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/kyc/documents": {
       "post": {
-        "tags": ["KYC"],
+        "tags": [
+          "KYC"
+        ],
         "summary": "Submit KYC document metadata",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycDocumentRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KycDocumentRequest"
+              },
+              "example": {
+                "documentType": "INTERNATIONAL_PASSPORT",
+                "documentNumber": "DOCS-ONLY-PASSPORT",
+                "frontImageUrl": "https://example.com/uploads/passport-front.jpg",
+                "selfieImageUrl": "https://example.com/uploads/selfie.jpg",
+                "issuedCountry": "NG",
+                "expiresAt": "2030-12-31"
+              }
+            }
+          }
         },
         "responses": {
           "201": {
             "description": "Document metadata stored.",
-            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycDocumentResponse" } } }
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycDocumentResponse"
+                }
+              }
+            }
           },
-          "400": { "$ref": "#/components/responses/MessageError" }
+          "400": {
+            "$ref": "#/components/responses/MessageError"
+          }
         }
       }
     },
     "/api/kyc/status": {
       "get": {
-        "tags": ["KYC"],
+        "tags": [
+          "KYC"
+        ],
         "summary": "Get authenticated user's KYC status",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
-          "200": { "description": "KYC status list.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/KycStatusResponse" } } } }
+          "200": {
+            "description": "KYC status list.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycStatusResponse"
+                }
+              }
+            }
+          }
         }
       }
     },
     "/api/wallet/webhook": {
       "post": {
-        "tags": ["Webhooks"],
+        "tags": [
+          "Webhooks"
+        ],
         "summary": "Maplerad provider callback",
         "description": "Unauthenticated provider callback. Authenticity is checked with the configured Maplerad signature header over the raw body. Provider private payloads are not documented.",
         "security": [],
-        "parameters": [{ "$ref": "#/components/parameters/MapleradSignature" }],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MapleradSignature"
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object", "additionalProperties": true } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MapleradWebhookRequest"
+              },
+              "example": {
+                "id": "evt_docs_01",
+                "event": "collections.virtual_account.deposit",
+                "data": {
+                  "reference": "deposit_docs_01",
+                  "customer_id": "customer_docs_01",
+                  "amount": 500000,
+                  "currency": "NGN",
+                  "status": "success"
+                }
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Webhook accepted, ignored, or duplicate.", "content": { "application/json": { "examples": { "accepted": { "value": { "ok": true, "duplicate": false } }, "ignored": { "value": { "ok": true, "ignored": true } } } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "401": { "$ref": "#/components/responses/OkFalseError" },
-          "500": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Webhook accepted, ignored, or duplicate.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "accepted": {
+                    "value": {
+                      "ok": true,
+                      "duplicate": false
+                    }
+                  },
+                  "ignored": {
+                    "value": {
+                      "ok": true,
+                      "ignored": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "401": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "500": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/wallet/create/{userId}": {
       "post": {
-        "tags": ["Wallet"],
+        "tags": [
+          "Wallet"
+        ],
         "summary": "Create NGN wallet and virtual account",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/UserIdPath" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserIdPath"
+          }
+        ],
         "responses": {
-          "201": { "description": "Wallet created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WalletResponse" } } } },
-          "200": { "description": "Existing wallet returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WalletResponse" } } } },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Existing wallet returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Wallet created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "This operation does not consume input fields. Send an empty JSON object if a body is required by the client.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "maxProperties": 0
+              },
+              "example": {}
+            }
+          }
         }
       }
     },
     "/api/wallet/create-usd/{userId}": {
       "post": {
-        "tags": ["Wallet"],
+        "tags": [
+          "Wallet"
+        ],
         "summary": "Request USD virtual account",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/UserIdPath" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserIdPath"
+          }
+        ],
         "responses": {
-          "201": { "description": "USD account request returned from provider.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsdAccountRequestResponse" } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "201": {
+            "description": "USD account request returned from provider.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsdAccountRequestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "This operation does not consume input fields. Send an empty JSON object if a body is required by the client.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "maxProperties": 0
+              },
+              "example": {}
+            }
+          }
         }
       }
     },
     "/api/wallet/balance/{userId}": {
       "get": {
-        "tags": ["Wallet"],
+        "tags": [
+          "Wallet"
+        ],
         "summary": "List authenticated user's wallets and balances",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/UserIdPath" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserIdPath"
+          }
+        ],
         "responses": {
-          "200": { "description": "Wallets returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WalletListResponse" } } } },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Wallets returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/wallet/withdraw": {
       "post": {
-        "tags": ["Wallet"],
+        "tags": [
+          "Wallet"
+        ],
         "summary": "Withdraw from wallet to bank account",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WithdrawRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawRequest"
+              },
+              "example": {
+                "amount": 5000,
+                "currency": "NGN",
+                "bankCode": "000013",
+                "accountNumber": "0000000000",
+                "accountName": "Ada Okafor",
+                "description": "Wallet withdrawal",
+                "transactionPin": "0000"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Withdrawal submitted or duplicate returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionProviderResponse" } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "403": { "$ref": "#/components/responses/OkFalseError" },
-          "502": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Withdrawal submitted or duplicate returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "502": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/wallet/cards/create": {
       "post": {
-        "tags": ["Cards"],
+        "tags": [
+          "Cards"
+        ],
         "summary": "Create a virtual card",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateCardRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCardRequest"
+              },
+              "example": {
+                "walletId": "22222222-2222-4222-8222-222222222222",
+                "currency": "USD"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Safe card metadata. PAN/CVV are not returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardResponse" } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "404": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Safe card metadata. PAN/CVV are not returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "404": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/wallet/cards/{id}/fund": {
       "post": {
-        "tags": ["Cards"],
+        "tags": [
+          "Cards"
+        ],
         "summary": "Fund a virtual card from wallet balance",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/CardIdPath" }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CardIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardMoneyMovementRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardMoneyMovementRequest"
+              },
+              "example": {
+                "amount": 25,
+                "currency": "USD",
+                "transactionPin": "0000"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Card funding submitted or duplicate returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionProviderResponse" } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Card funding submitted or duplicate returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/wallet/cards/{id}/withdraw": {
       "post": {
-        "tags": ["Cards"],
+        "tags": [
+          "Cards"
+        ],
         "summary": "Withdraw funds from card to wallet",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/CardIdPath" }, { "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CardIdPath"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardMoneyMovementRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CardMoneyMovementRequest"
+              },
+              "example": {
+                "amount": 10,
+                "currency": "USD",
+                "transactionPin": "0000"
+              }
+            }
+          }
         },
         "responses": {
-          "200": { "description": "Wallet credited from card withdrawal.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionProviderResponse" } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Wallet credited from card withdrawal.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/wallet/cards/{id}/freeze": {
       "post": {
-        "tags": ["Cards"],
+        "tags": [
+          "Cards"
+        ],
         "summary": "Freeze an owned virtual card",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/CardIdPath" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CardIdPath"
+          }
+        ],
         "responses": {
-          "200": { "description": "Card frozen.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardMessageResponse" } } } },
-          "404": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Card frozen.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardMessageResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "This operation does not consume input fields. Send an empty JSON object if a body is required by the client.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "maxProperties": 0
+              },
+              "example": {}
+            }
+          }
         }
       }
     },
     "/api/wallet/cards/{id}/unfreeze": {
       "post": {
-        "tags": ["Cards"],
+        "tags": [
+          "Cards"
+        ],
         "summary": "Unfreeze an owned virtual card",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/CardIdPath" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/CardIdPath"
+          }
+        ],
         "responses": {
-          "200": { "description": "Card unfrozen.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CardMessageResponse" } } } },
-          "404": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Card unfrozen.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CardMessageResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "description": "This operation does not consume input fields. Send an empty JSON object if a body is required by the client.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "maxProperties": 0
+              },
+              "example": {}
+            }
+          }
         }
       }
     },
     "/api/transaction": {
       "get": {
-        "tags": ["Transactions"],
+        "tags": [
+          "Transactions"
+        ],
         "summary": "List wallet and optional card transactions",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
-          { "name": "walletId", "in": "query", "required": false, "schema": { "type": "string", "format": "uuid" } },
-          { "name": "cardId", "in": "query", "required": false, "schema": { "type": "string", "format": "uuid" } },
-          { "name": "type", "in": "query", "required": false, "schema": { "type": "string", "enum": ["sent", "received"] } },
-          { "name": "startDate", "in": "query", "required": false, "schema": { "type": "string", "format": "date-time" } },
-          { "name": "endDate", "in": "query", "required": false, "schema": { "type": "string", "format": "date-time" } }
+          {
+            "name": "walletId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cardId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sent",
+                "received"
+              ]
+            }
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
         ],
         "responses": {
-          "200": { "description": "Transactions returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionListResponse" } } } },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Transactions returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionListResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/transaction/log": {
       "post": {
-        "tags": ["Transactions"],
+        "tags": [
+          "Transactions"
+        ],
         "summary": "Internal wallet transfer",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/InternalTransferRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternalTransferRequest"
+              },
+              "example": {
+                "senderWalletId": "22222222-2222-4222-8222-222222222222",
+                "recipientWalletId": "33333333-3333-4333-8333-333333333333",
+                "amount": 1000,
+                "currency": "NGN",
+                "description": "Wallet transfer",
+                "transactionPin": "0000"
+              }
+            }
+          }
         },
         "responses": {
-          "201": { "description": "Transfer created.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionDuplicateResponse" } } } },
-          "200": { "description": "Duplicate transfer retry returned.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionDuplicateResponse" } } } },
-          "400": { "$ref": "#/components/responses/OkFalseError" },
-          "403": { "$ref": "#/components/responses/OkFalseError" }
+          "200": {
+            "description": "Duplicate transfer retry returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionDuplicateResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Transfer created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionDuplicateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/OkFalseError"
+          },
+          "403": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
         }
       }
     },
     "/api/admin/audit-logs": {
       "get": {
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "summary": "List sanitized audit logs",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/PageQuery" }, { "$ref": "#/components/parameters/LimitQuery" }],
-        "responses": { "200": { "description": "Paginated audit logs.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedItemsResponse" } } } }, "403": { "$ref": "#/components/responses/MessageError" } }
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated audit logs.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedItemsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/MessageError"
+          }
+        }
       }
     },
     "/api/admin/risk-flags": {
       "get": {
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "summary": "List open risk flags",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/PageQuery" }, { "$ref": "#/components/parameters/LimitQuery" }],
-        "responses": { "200": { "description": "Paginated open risk flags.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PaginatedItemsResponse" } } } }, "403": { "$ref": "#/components/responses/MessageError" } }
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageQuery"
+          },
+          {
+            "$ref": "#/components/parameters/LimitQuery"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated open risk flags.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedItemsResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/MessageError"
+          }
+        }
       }
     },
     "/api/admin/reconciliation": {
       "get": {
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "summary": "List stale provider transactions for reconciliation",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "name": "thresholdMinutes", "in": "query", "required": false, "schema": { "type": "integer", "default": 30 } }],
-        "responses": { "200": { "description": "Reconciliation queue.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReconciliationResponse" } } } }, "403": { "$ref": "#/components/responses/MessageError" } }
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "thresholdMinutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reconciliation queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconciliationResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/MessageError"
+          }
+        }
       }
     },
     "/api/admin/transactions/{id}/manual-review": {
       "post": {
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "summary": "Mark transaction for manual review",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "required": false,
-          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ManualReviewRequest" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualReviewRequest"
+              },
+              "example": {
+                "notes": "Provider status requires manual review."
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "Transaction marked for review.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TransactionResponse" } } } }, "404": { "$ref": "#/components/responses/OkFalseError" } }
+        "responses": {
+          "200": {
+            "description": "Transaction marked for review.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/OkFalseError"
+          }
+        }
       }
     },
     "/api/admin/users/{userId}/wallet-summary": {
       "get": {
-        "tags": ["Admin"],
+        "tags": [
+          "Admin"
+        ],
         "summary": "Get a user's wallet summary",
-        "security": [{ "bearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/UserIdPath" }],
-        "responses": { "200": { "description": "Wallet summary.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminWalletSummaryResponse" } } } }, "403": { "$ref": "#/components/responses/MessageError" } }
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/UserIdPath"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Wallet summary.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWalletSummaryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/MessageError"
+          }
+        }
       }
     }
   },
   "components": {
     "securitySchemes": {
-      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
     },
     "parameters": {
       "IdempotencyKey": {
@@ -583,83 +1592,1095 @@
         "in": "header",
         "required": true,
         "description": "Required for money movement endpoints. Must be a stable unique string of at least 8 characters per client operation. The backend also accepts idempotencyKey in JSON body.",
-        "schema": { "type": "string", "minLength": 8 },
-        "example": "wd_01hzz6n5qx9m8v2k"
+        "schema": {
+          "type": "string",
+          "minLength": 8
+        },
+        "example": "money_move_docs_01"
       },
       "MapleradSignature": {
         "name": "x-maplerad-signature",
         "in": "header",
         "required": true,
         "description": "Maplerad HMAC signature header. Actual header name can be changed by MAPLERAD_SIGNATURE_HEADER.",
-        "schema": { "type": "string" },
-        "example": "hex_hmac_signature"
+        "schema": {
+          "type": "string"
+        },
+        "example": "DOCS_ONLY_HMAC_SIGNATURE"
       },
-      "UserIdPath": { "name": "userId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-      "CardIdPath": { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
-      "PageQuery": { "name": "page", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "default": 1 } },
-      "LimitQuery": { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50 } }
-    },
-    "responses": {
-      "MessageOk": { "description": "Message response.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessageResponse" }, "example": { "message": "Operation completed successfully." } } } },
-      "MessageError": { "description": "Error response.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessageResponse" }, "example": { "message": "Authentication required" } } } },
-      "OkFalseError": { "description": "Error response.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OkFalseError" }, "example": { "ok": false, "message": "Invalid transaction PIN" } } } },
-      "RegisterOtpSent": { "description": "OTP sent.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/MessageResponse" }, "example": { "message": "OTP sent to your email. Please verify to complete registration." } } } }
-    },
-    "schemas": {
-      "Currency": { "type": "string", "enum": ["NGN", "USD", "GBP"] },
-      "MessageResponse": { "type": "object", "properties": { "message": { "type": "string" } }, "required": ["message"] },
-      "OkFalseError": { "type": "object", "properties": { "ok": { "type": "boolean", "example": false }, "message": { "type": "string" } }, "required": ["ok", "message"] },
-      "StatusResponse": { "type": "object", "properties": { "status": { "type": "string" } }, "required": ["status"] },
-      "RegisterRequest": {
-        "type": "object",
-        "required": ["firstName", "lastName", "email", "password", "gender", "phoneNumber"],
-        "properties": {
-          "firstName": { "type": "string", "example": "Ada" },
-          "lastName": { "type": "string", "example": "Okafor" },
-          "email": { "type": "string", "format": "email", "example": "ada@example.com" },
-          "password": { "type": "string", "format": "password" },
-          "gender": { "type": "string", "example": "female" },
-          "phoneNumber": { "type": "string", "example": "+2348012345678" }
+      "UserIdPath": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
         }
       },
-      "LoginRequest": { "type": "object", "required": ["email", "password"], "properties": { "email": { "type": "string", "format": "email", "example": "ada@example.com" }, "password": { "type": "string", "format": "password" } } },
-      "EmailRequest": { "type": "object", "required": ["email"], "properties": { "email": { "type": "string", "format": "email", "example": "ada@example.com" } } },
-      "OtpVerifyRequest": { "type": "object", "required": ["email", "otp"], "properties": { "email": { "type": "string", "format": "email" }, "otp": { "type": "string", "description": "One-time password entered by the user. Never log this value.", "writeOnly": true } } },
-      "CreatePinRequest": { "type": "object", "required": ["pin"], "properties": { "pin": { "type": "string", "pattern": "^\\d{4}$", "description": "Four digit transaction PIN. Never log this value.", "writeOnly": true } } },
-      "ResetPasswordRequest": { "type": "object", "required": ["email", "otp", "newPassword"], "properties": { "email": { "type": "string", "format": "email" }, "otp": { "type": "string", "writeOnly": true }, "newPassword": { "type": "string", "format": "password" } } },
-      "UserIdRequest": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "string", "format": "uuid" } } },
-      "AuthTokenResponse": { "type": "object", "properties": { "token": { "type": "string", "example": "jwt_token" }, "message": { "type": "string" } }, "required": ["token", "message"] },
-      "LoginResponse": { "type": "object", "properties": { "token": { "type": "string", "example": "jwt_token" }, "userId": { "type": "string", "format": "uuid" }, "message": { "type": "string" } }, "required": ["token", "userId", "message"] },
-      "Profile": { "type": "object", "properties": { "firstName": { "type": "string" }, "lastName": { "type": "string" }, "email": { "type": "string" }, "gender": { "type": "string" }, "phoneNumber": { "type": "string", "nullable": true }, "nationality": { "type": "string", "nullable": true }, "dateOfBirth": { "type": "string", "nullable": true }, "address": { "type": "string", "nullable": true } } },
-      "ProfileUpdateRequest": { "type": "object", "additionalProperties": true, "properties": { "firstName": { "type": "string" }, "lastName": { "type": "string" }, "gender": { "type": "string" }, "phoneNumber": { "type": "string" }, "nationality": { "type": "string" }, "dateOfBirth": { "type": "string" }, "address": { "type": "string" } } },
-      "ChangePasswordRequest": { "type": "object", "required": ["currentPassword", "newPassword"], "properties": { "currentPassword": { "type": "string", "format": "password" }, "newPassword": { "type": "string", "format": "password" } } },
-      "KycStartResponse": { "type": "object", "properties": { "message": { "type": "string" }, "provider": { "type": "string", "example": "maplerad" }, "documentTypes": { "type": "array", "items": { "type": "string", "enum": ["NIN", "DRIVERS_LICENSE", "INTERNATIONAL_PASSPORT", "VOTERS_CARD"] } } } },
-      "BvnRequest": { "type": "object", "required": ["bvn"], "properties": { "bvn": { "type": "string", "pattern": "^\\d{11}$", "description": "11 digit BVN. Do not store or log in frontend/mobile clients.", "writeOnly": true } } },
-      "KycResultResponse": { "type": "object", "properties": { "message": { "type": "string" }, "status": { "type": "string", "enum": ["PASSED", "FAILED"] } } },
-      "KycDocumentRequest": { "type": "object", "required": ["documentType"], "properties": { "documentType": { "type": "string", "enum": ["NIN", "DRIVERS_LICENSE", "INTERNATIONAL_PASSPORT", "VOTERS_CARD"] }, "documentNumber": { "type": "string" }, "frontImageUrl": { "type": "string", "format": "uri" }, "backImageUrl": { "type": "string", "format": "uri" }, "selfieImageUrl": { "type": "string", "format": "uri" }, "issuedCountry": { "type": "string", "example": "NG" }, "expiresAt": { "type": "string", "format": "date" } } },
-      "KycDocumentResponse": { "type": "object", "properties": { "message": { "type": "string" }, "verificationId": { "type": "string", "format": "uuid" }, "status": { "type": "string", "example": "PENDING" } } },
-      "KycStatusResponse": { "type": "object", "properties": { "userId": { "type": "string", "format": "uuid" }, "verifications": { "type": "array", "items": { "$ref": "#/components/schemas/KycVerification" } } } },
-      "KycVerification": { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" }, "type": { "type": "string" }, "status": { "type": "string" }, "metadata": { "type": "object", "additionalProperties": true }, "createdAt": { "type": "string", "format": "date-time" } } },
-      "Wallet": { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" }, "mapleradAccountId": { "type": "string", "nullable": true }, "accountNumber": { "type": "string", "nullable": true }, "bankName": { "type": "string", "nullable": true }, "currency": { "$ref": "#/components/schemas/Currency" }, "balance": { "type": "string", "example": "0.00" }, "availableBalance": { "type": "string", "example": "0.00" }, "pendingBalance": { "type": "string", "example": "0.00" }, "ledgerBalance": { "type": "string", "example": "0.00" }, "usdAccountId": { "type": "string", "nullable": true }, "usdAccountStatus": { "type": "string", "enum": ["pending", "approved", "rejected"] }, "createdAt": { "type": "string", "format": "date-time" }, "updatedAt": { "type": "string", "format": "date-time" } } },
-      "WalletResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "wallet": { "$ref": "#/components/schemas/Wallet" } } },
-      "WalletListResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "wallets": { "type": "array", "items": { "$ref": "#/components/schemas/Wallet" } } } },
-      "UsdAccountRequestResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "usdAccountRequest": { "type": "object", "additionalProperties": true, "example": { "reference": "usd_account_request_reference", "status": "pending" } } } },
-      "WithdrawRequest": { "type": "object", "required": ["amount", "currency", "bankCode", "accountNumber", "transactionPin"], "properties": { "amount": { "type": "number", "example": 5000 }, "currency": { "$ref": "#/components/schemas/Currency" }, "bankCode": { "type": "string", "example": "bank_code" }, "accountNumber": { "type": "string", "description": "Recipient bank account number." }, "accountName": { "type": "string", "example": "Ada Okafor" }, "description": { "type": "string" }, "transactionPin": { "type": "string", "writeOnly": true }, "idempotencyKey": { "type": "string", "description": "Optional body fallback for Idempotency-Key header." } } },
-      "CreateCardRequest": { "type": "object", "required": ["walletId", "currency"], "properties": { "walletId": { "type": "string", "format": "uuid" }, "currency": { "$ref": "#/components/schemas/Currency" } } },
-      "CardMoneyMovementRequest": { "type": "object", "required": ["amount", "currency", "transactionPin"], "properties": { "amount": { "type": "number", "example": 25 }, "currency": { "$ref": "#/components/schemas/Currency" }, "transactionPin": { "type": "string", "writeOnly": true }, "idempotencyKey": { "type": "string" } } },
-      "Card": { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" }, "mapleradCardId": { "type": "string", "nullable": true }, "cardLast4": { "type": "string", "nullable": true }, "expirationDate": { "type": "string", "nullable": true }, "brand": { "type": "string", "nullable": true }, "currency": { "type": "string" }, "status": { "type": "string", "enum": ["active", "inactive", "blocked"] }, "isFrozen": { "type": "boolean" }, "createdAt": { "type": "string", "format": "date-time" } } },
-      "CardResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "card": { "$ref": "#/components/schemas/Card" } } },
-      "CardMessageResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "message": { "type": "string" }, "card": { "$ref": "#/components/schemas/Card" } } },
-      "Transaction": { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" }, "userId": { "type": "string", "format": "uuid" }, "senderWalletId": { "type": "string", "format": "uuid", "nullable": true }, "recipientWalletId": { "type": "string", "format": "uuid", "nullable": true }, "type": { "type": "string", "enum": ["deposit", "withdrawal", "transfer"] }, "amount": { "type": "string", "example": "5000.00" }, "currency": { "$ref": "#/components/schemas/Currency" }, "status": { "type": "string" }, "reference": { "type": "string", "nullable": true }, "provider": { "type": "string", "nullable": true }, "providerReference": { "type": "string", "nullable": true }, "providerStatus": { "type": "string", "nullable": true }, "reconciliationStatus": { "type": "string" }, "createdAt": { "type": "string", "format": "date-time" } } },
-      "TransactionProviderResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "transaction": { "$ref": "#/components/schemas/Transaction" }, "provider": { "type": "object", "properties": { "reference": { "type": "string" }, "status": { "type": "string" } } }, "duplicate": { "type": "boolean" } } },
-      "InternalTransferRequest": { "type": "object", "required": ["senderWalletId", "recipientWalletId", "amount", "currency", "transactionPin"], "properties": { "senderWalletId": { "type": "string", "format": "uuid" }, "recipientWalletId": { "type": "string", "format": "uuid" }, "amount": { "type": "number", "example": 1000 }, "currency": { "$ref": "#/components/schemas/Currency" }, "description": { "type": "string" }, "transactionPin": { "type": "string", "writeOnly": true }, "idempotencyKey": { "type": "string" } } },
-      "TransactionDuplicateResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "transaction": { "$ref": "#/components/schemas/Transaction" }, "duplicate": { "type": "boolean" } } },
-      "TransactionListResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "count": { "type": "integer" }, "transactions": { "type": "array", "items": { "type": "object", "additionalProperties": true } } } },
-      "PaginatedItemsResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "page": { "type": "integer" }, "limit": { "type": "integer" }, "total": { "type": "integer" }, "items": { "type": "array", "items": { "type": "object", "additionalProperties": true } } } },
-      "ReconciliationResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "count": { "type": "integer" }, "transactions": { "type": "array", "items": { "$ref": "#/components/schemas/Transaction" } } } },
-      "ManualReviewRequest": { "type": "object", "properties": { "notes": { "type": "string", "example": "Provider status requires manual review." } } },
-      "TransactionResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "transaction": { "$ref": "#/components/schemas/Transaction" } } },
-      "AdminWalletSummaryResponse": { "type": "object", "properties": { "ok": { "type": "boolean" }, "userId": { "type": "string", "format": "uuid" }, "wallets": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string", "format": "uuid" }, "currency": { "$ref": "#/components/schemas/Currency" }, "availableBalance": { "type": "string" }, "pendingBalance": { "type": "string" }, "ledgerBalance": { "type": "string" }, "accountNumber": { "type": "string", "nullable": true }, "bankName": { "type": "string", "nullable": true } } } } } }
+      "CardIdPath": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "PageQuery": {
+        "name": "page",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "LimitQuery": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50
+        }
+      }
+    },
+    "responses": {
+      "MessageOk": {
+        "description": "Message response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "example": {
+              "message": "Operation completed successfully."
+            }
+          }
+        }
+      },
+      "MessageError": {
+        "description": "Error response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "example": {
+              "message": "Authentication required"
+            }
+          }
+        }
+      },
+      "OkFalseError": {
+        "description": "Error response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/OkFalseError"
+            },
+            "example": {
+              "ok": false,
+              "message": "Invalid transaction PIN"
+            }
+          }
+        }
+      },
+      "RegisterOtpSent": {
+        "description": "OTP sent.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "example": {
+              "message": "OTP sent to your email. Please verify to complete registration."
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Currency": {
+        "type": "string",
+        "enum": [
+          "NGN",
+          "USD",
+          "GBP"
+        ]
+      },
+      "MessageResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "OkFalseError": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "message"
+        ]
+      },
+      "StatusResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": [
+          "firstName",
+          "lastName",
+          "email",
+          "password",
+          "gender",
+          "phoneNumber"
+        ],
+        "properties": {
+          "firstName": {
+            "type": "string",
+            "example": "Ada"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Okafor"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          },
+          "gender": {
+            "type": "string",
+            "example": "female"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "example": "+2348012345678"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          },
+          "password": {
+            "type": "string",
+            "format": "password"
+          }
+        }
+      },
+      "EmailRequest": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "example": "ada@example.com"
+          }
+        }
+      },
+      "OtpVerifyRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "otp"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "otp": {
+            "type": "string",
+            "description": "One-time password entered by the user. Never log this value.",
+            "writeOnly": true
+          }
+        }
+      },
+      "CreatePinRequest": {
+        "type": "object",
+        "required": [
+          "pin"
+        ],
+        "properties": {
+          "pin": {
+            "type": "string",
+            "pattern": "^\\d{4}$",
+            "description": "Four digit transaction PIN. Never log this value.",
+            "writeOnly": true
+          }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "otp",
+          "newPassword"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "otp": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "newPassword": {
+            "type": "string",
+            "format": "password"
+          }
+        }
+      },
+      "UserIdRequest": {
+        "type": "object",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "AuthTokenResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "example": "jwt_token"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "message"
+        ]
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "example": "jwt_token"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "userId",
+          "message"
+        ]
+      },
+      "Profile": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "gender": {
+            "type": "string"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "nationality": {
+            "type": "string",
+            "nullable": true
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "nullable": true
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "ProfileUpdateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "gender": {
+            "type": "string"
+          },
+          "phoneNumber": {
+            "type": "string"
+          },
+          "country": {
+            "type": "string",
+            "example": "NG"
+          },
+          "nationality": {
+            "type": "string"
+          },
+          "dateOfBirth": {
+            "type": "string",
+            "format": "date"
+          },
+          "address": {
+            "type": "string"
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "format": "password"
+          },
+          "newPassword": {
+            "type": "string",
+            "format": "password"
+          }
+        }
+      },
+      "KycStartResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string",
+            "example": "maplerad"
+          },
+          "documentTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "NIN",
+                "DRIVERS_LICENSE",
+                "INTERNATIONAL_PASSPORT",
+                "VOTERS_CARD"
+              ]
+            }
+          }
+        }
+      },
+      "BvnRequest": {
+        "type": "object",
+        "required": [
+          "bvn"
+        ],
+        "properties": {
+          "bvn": {
+            "type": "string",
+            "pattern": "^\\d{11}$",
+            "description": "11 digit BVN. Do not store or log in frontend/mobile clients.",
+            "writeOnly": true
+          }
+        }
+      },
+      "KycResultResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PASSED",
+              "FAILED"
+            ]
+          }
+        }
+      },
+      "KycDocumentRequest": {
+        "type": "object",
+        "required": [
+          "documentType"
+        ],
+        "properties": {
+          "documentType": {
+            "type": "string",
+            "enum": [
+              "NIN",
+              "DRIVERS_LICENSE",
+              "INTERNATIONAL_PASSPORT",
+              "VOTERS_CARD"
+            ]
+          },
+          "documentNumber": {
+            "type": "string"
+          },
+          "frontImageUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "backImageUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "selfieImageUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "issuedCountry": {
+            "type": "string",
+            "example": "NG"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date"
+          }
+        }
+      },
+      "KycDocumentResponse": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "verificationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "example": "PENDING"
+          }
+        }
+      },
+      "KycStatusResponse": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "verifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KycVerification"
+            }
+          }
+        }
+      },
+      "KycVerification": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Wallet": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mapleradAccountId": {
+            "type": "string",
+            "nullable": true
+          },
+          "accountNumber": {
+            "type": "string",
+            "nullable": true
+          },
+          "bankName": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "balance": {
+            "type": "string",
+            "example": "0.00"
+          },
+          "availableBalance": {
+            "type": "string",
+            "example": "0.00"
+          },
+          "pendingBalance": {
+            "type": "string",
+            "example": "0.00"
+          },
+          "ledgerBalance": {
+            "type": "string",
+            "example": "0.00"
+          },
+          "usdAccountId": {
+            "type": "string",
+            "nullable": true
+          },
+          "usdAccountStatus": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WalletResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "wallet": {
+            "$ref": "#/components/schemas/Wallet"
+          }
+        }
+      },
+      "WalletListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "wallets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Wallet"
+            }
+          }
+        }
+      },
+      "UsdAccountRequestResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "usdAccountRequest": {
+            "type": "object",
+            "additionalProperties": true,
+            "example": {
+              "reference": "usd_account_request_reference",
+              "status": "pending"
+            }
+          }
+        }
+      },
+      "WithdrawRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "currency",
+          "bankCode",
+          "accountNumber",
+          "transactionPin"
+        ],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "example": 5000
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "bankCode": {
+            "type": "string",
+            "example": "bank_code"
+          },
+          "accountNumber": {
+            "type": "string",
+            "description": "Recipient bank account number."
+          },
+          "accountName": {
+            "type": "string",
+            "example": "Ada Okafor"
+          },
+          "description": {
+            "type": "string"
+          },
+          "transactionPin": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Optional body fallback for Idempotency-Key header."
+          }
+        }
+      },
+      "CreateCardRequest": {
+        "type": "object",
+        "required": [
+          "walletId",
+          "currency"
+        ],
+        "properties": {
+          "walletId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          }
+        }
+      },
+      "CardMoneyMovementRequest": {
+        "type": "object",
+        "required": [
+          "amount",
+          "currency",
+          "transactionPin"
+        ],
+        "properties": {
+          "amount": {
+            "type": "number",
+            "example": 25
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "transactionPin": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        }
+      },
+      "Card": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mapleradCardId": {
+            "type": "string",
+            "nullable": true
+          },
+          "cardLast4": {
+            "type": "string",
+            "nullable": true
+          },
+          "expirationDate": {
+            "type": "string",
+            "nullable": true
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "inactive",
+              "blocked"
+            ]
+          },
+          "isFrozen": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CardResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "card": {
+            "$ref": "#/components/schemas/Card"
+          }
+        }
+      },
+      "CardMessageResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          },
+          "card": {
+            "$ref": "#/components/schemas/Card"
+          }
+        }
+      },
+      "Transaction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "senderWalletId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "recipientWalletId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "deposit",
+              "withdrawal",
+              "transfer"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "example": "5000.00"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "status": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string",
+            "nullable": true
+          },
+          "provider": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerReference": {
+            "type": "string",
+            "nullable": true
+          },
+          "providerStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "reconciliationStatus": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TransactionProviderResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/Transaction"
+          },
+          "provider": {
+            "type": "object",
+            "properties": {
+              "reference": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          },
+          "duplicate": {
+            "type": "boolean"
+          }
+        }
+      },
+      "InternalTransferRequest": {
+        "type": "object",
+        "required": [
+          "senderWalletId",
+          "recipientWalletId",
+          "amount",
+          "currency",
+          "transactionPin"
+        ],
+        "properties": {
+          "senderWalletId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recipientWalletId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "number",
+            "example": 1000
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "description": {
+            "type": "string"
+          },
+          "transactionPin": {
+            "type": "string",
+            "writeOnly": true
+          },
+          "idempotencyKey": {
+            "type": "string"
+          }
+        }
+      },
+      "TransactionDuplicateResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/Transaction"
+          },
+          "duplicate": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TransactionListResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "PaginatedItemsResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "page": {
+            "type": "integer"
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "ReconciliationResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "transactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Transaction"
+            }
+          }
+        }
+      },
+      "ManualReviewRequest": {
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "string",
+            "example": "Provider status requires manual review."
+          }
+        }
+      },
+      "TransactionResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/Transaction"
+          }
+        }
+      },
+      "AdminWalletSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "wallets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "currency": {
+                  "$ref": "#/components/schemas/Currency"
+                },
+                "availableBalance": {
+                  "type": "string"
+                },
+                "pendingBalance": {
+                  "type": "string"
+                },
+                "ledgerBalance": {
+                  "type": "string"
+                },
+                "accountNumber": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "bankName": {
+                  "type": "string",
+                  "nullable": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "MapleradWebhookRequest": {
+        "type": "object",
+        "required": [
+          "id",
+          "event",
+          "data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Provider event identifier."
+          },
+          "event": {
+            "type": "string",
+            "description": "Maplerad event name."
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
     }
   }
 }

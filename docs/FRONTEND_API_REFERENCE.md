@@ -8,7 +8,7 @@ This reference documents the implemented Express routes in this backend for web,
 | --- | --- |
 | Staging | `https://api-staging.papifi.com` |
 | Production | `https://api.papifi.com` |
-| Local | `http://localhost:3000` |
+| Local | `http://localhost:5000` |
 
 The backend source defaults to `PORT=5000` when `PORT` is not configured. Use the deployed or local base URL provided by the environment you are testing.
 
@@ -22,6 +22,73 @@ The backend source defaults to `PORT=5000` when `PORT` is not configured. Use th
 | `x-maplerad-signature` | Yes | `POST /api/wallet/webhook` | Provider callback only. Header name can be changed with `MAPLERAD_SIGNATURE_HEADER`. |
 
 Never log passwords, OTPs, transaction PINs, BVNs, card PANs, CVVs, bearer tokens, or provider webhook payloads.
+
+## Request Payload Examples
+
+All sensitive-looking values below are documentation-only placeholders. Replace them at runtime and never persist or log passwords, OTPs, PINs, BVNs, bearer tokens, or webhook signatures.
+
+### Authentication and Profile
+
+```json
+{
+  "POST /api/auth/register": { "firstName": "Ada", "lastName": "Okafor", "email": "ada.okafor@example.com", "password": "DOCS_ONLY_PASSWORD", "gender": "female", "phoneNumber": "+2348012345678" },
+  "POST /api/auth/verify-otp": { "email": "ada.okafor@example.com", "otp": "000000" },
+  "POST /api/auth/login": { "email": "ada.okafor@example.com", "password": "DOCS_ONLY_PASSWORD" },
+  "POST /api/auth/resend-otp": { "email": "ada.okafor@example.com" },
+  "POST /api/auth/forgot-password": { "email": "ada.okafor@example.com" },
+  "POST /api/auth/reset-passwordOtp": { "email": "ada.okafor@example.com", "otp": "000000" },
+  "POST /api/auth/reset-password": { "email": "ada.okafor@example.com", "otp": "000000", "newPassword": "DOCS_ONLY_NEW_PASSWORD" },
+  "POST /api/auth/create-pin": { "pin": "0000" },
+  "PUT /api/profile": { "gender": "female", "phoneNumber": "+2348012345678", "country": "NG", "nationality": "Nigerian", "dateOfBirth": "1995-04-12", "address": "12 Example Road, Lagos" },
+  "PUT /api/profile/change-password": { "currentPassword": "DOCS_ONLY_CURRENT_PASSWORD", "newPassword": "DOCS_ONLY_NEW_PASSWORD" }
+}
+```
+
+### Role Management and KYC
+
+```json
+{
+  "POST /api/auth/make-admin": { "userId": "11111111-1111-4111-8111-111111111111" },
+  "POST /api/auth/remove-admin": { "userId": "11111111-1111-4111-8111-111111111111" },
+  "POST /api/kyc/bvn": { "bvn": "00000000000" },
+  "POST /api/kyc/documents": { "documentType": "INTERNATIONAL_PASSPORT", "documentNumber": "DOCS-ONLY-PASSPORT", "frontImageUrl": "https://example.com/uploads/passport-front.jpg", "selfieImageUrl": "https://example.com/uploads/selfie.jpg", "issuedCountry": "NG", "expiresAt": "2030-12-31" },
+  "POST /api/admin/transactions/{id}/manual-review": { "notes": "Provider status requires manual review." }
+}
+```
+
+### Wallet, Cards, and Transfers
+
+Send `Idempotency-Key: money_move_docs_01` with withdrawal, transfer, card-funding, and card-withdrawal requests. Generate a new unique value for each real operation.
+
+```json
+{
+  "POST /api/wallet/withdraw": { "amount": 5000, "currency": "NGN", "bankCode": "000013", "accountNumber": "0000000000", "accountName": "Ada Okafor", "description": "Wallet withdrawal", "transactionPin": "0000" },
+  "POST /api/wallet/cards/create": { "walletId": "22222222-2222-4222-8222-222222222222", "currency": "USD" },
+  "POST /api/wallet/cards/{id}/fund": { "amount": 25, "currency": "USD", "transactionPin": "0000" },
+  "POST /api/wallet/cards/{id}/withdraw": { "amount": 10, "currency": "USD", "transactionPin": "0000" },
+  "POST /api/transaction/log": { "senderWalletId": "22222222-2222-4222-8222-222222222222", "recipientWalletId": "33333333-3333-4333-8333-333333333333", "amount": 1000, "currency": "NGN", "description": "Wallet transfer", "transactionPin": "0000" }
+}
+```
+
+The following commands consume no fields; their documented optional payload is `{}`: `POST /api/kyc/start`, both wallet-create endpoints, and card freeze/unfreeze.
+
+### Maplerad Webhook
+
+This provider-only example requires `x-maplerad-signature: DOCS_ONLY_HMAC_SIGNATURE`. The backend verifies the signature against the exact raw JSON bytes.
+
+```json
+{
+  "id": "evt_docs_01",
+  "event": "collections.virtual_account.deposit",
+  "data": {
+    "reference": "deposit_docs_01",
+    "customer_id": "customer_docs_01",
+    "amount": 500000,
+    "currency": "NGN",
+    "status": "success"
+  }
+}
+```
 
 ## Common Response Patterns
 
@@ -92,7 +159,7 @@ Create or update it with `POST /api/auth/create-pin`. PIN must be exactly 4 digi
 | Method | Path | Auth | Body or Query | Success |
 | --- | --- | --- | --- | --- |
 | `GET` | `/api/profile` | Bearer | None | Returns `firstName`, `lastName`, `email`, `gender`, `phoneNumber`, `nationality`, `dateOfBirth`, `address`. |
-| `PUT` | `/api/profile` | Bearer | Updatable profile fields | Returns updated profile object. |
+| `PUT` | `/api/profile` | Bearer | Any of `gender`, `phoneNumber`, `country`, `nationality`, `dateOfBirth`, `address` | Returns updated profile object. `email`, `firstName`, and `lastName` cannot be changed here. |
 | `PUT` | `/api/profile/change-password` | Bearer | `currentPassword`, `newPassword` | `{ "message": "Password updated successfully" }` |
 
 The service rejects updates to `email`, `firstName`, and `lastName`.
