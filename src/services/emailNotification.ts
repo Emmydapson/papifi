@@ -1,54 +1,123 @@
-import nodemailer from 'nodemailer';
+import axios from 'axios';
+import nodemailer, { Transporter } from 'nodemailer';
 import { logger } from './logger';
 
-// Create a transporter object using SMTP transport
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT!, 10),
-  secure: true, // Use true if you're using port 465
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-  logger: false,
-  debug: false,
-  tls: {
-    rejectUnauthorized: false, // Set to true if using self-signed certificates
-  },
-});
+type EmailProvider = 'resend' | 'smtp';
 
-// Function to send OTP email
-export const sendOTPEmail = async (email: string, otp: string) => {
+interface EmailMessage {
+  to: string;
+  subject: string;
+  text: string;
+}
+
+const RESEND_API_URL = 'https://api.resend.com/emails';
+const DEFAULT_HTTP_TIMEOUT_MS = 10_000;
+let smtpTransporter: Transporter | undefined;
+
+const getEmailProvider = (): EmailProvider => {
+  const provider = process.env.EMAIL_PROVIDER?.toLowerCase();
+  if (provider === 'resend' || provider === 'smtp') return provider;
+  throw new Error('EMAIL_PROVIDER must be either resend or smtp');
+};
+
+const requiredEnv = (name: string) => {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required for the configured email provider`);
+  return value;
+};
+
+const getHttpTimeout = () => {
+  const configured = Number(process.env.EMAIL_HTTP_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_HTTP_TIMEOUT_MS;
+};
+
+const getSmtpTransporter = () => {
+  if (smtpTransporter) return smtpTransporter;
+
+  const port = Number(requiredEnv('SMTP_PORT'));
+  if (!Number.isInteger(port) || port <= 0) throw new Error('SMTP_PORT must be a valid port');
+
+  smtpTransporter = nodemailer.createTransport({
+    host: requiredEnv('SMTP_HOST'),
+    port,
+    secure: port === 465,
+    auth: {
+      user: requiredEnv('SMTP_USER'),
+      pass: requiredEnv('SMTP_PASS'),
+    },
+    connectionTimeout: getHttpTimeout(),
+    greetingTimeout: getHttpTimeout(),
+    socketTimeout: getHttpTimeout(),
+    logger: false,
+    debug: false,
+  });
+
+  return smtpTransporter;
+};
+
+const sendWithResend = async (message: EmailMessage) => {
+  await axios.post(
+    RESEND_API_URL,
+    {
+      from: requiredEnv('SMTP_FROM_EMAIL'),
+      to: [message.to],
+      subject: message.subject,
+      text: message.text,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${requiredEnv('RESEND_API_KEY')}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: getHttpTimeout(),
+    },
+  );
+};
+
+const sendEmail = async (message: EmailMessage, eventName: string) => {
+  let provider: EmailProvider | 'unconfigured' = 'unconfigured';
+
   try {
-    const mailOptions = {
-      from: process.env.SMTP_FROM_EMAIL, // Sender email address
-      to: email, // Recipient email
-      subject: 'Your OTP Code',
-      text: `Your verification code is ${otp}, expires in 10 minutes`,
-    };
-
-    await transporter.sendMail(mailOptions);
-    logger.info('otp_email_sent');
+    provider = getEmailProvider();
+    if (provider === 'resend') {
+      await sendWithResend(message);
+    } else {
+      await getSmtpTransporter().sendMail({
+        from: requiredEnv('SMTP_FROM_EMAIL'),
+        ...message,
+      });
+    }
+    logger.info(`${eventName}_sent`, { provider });
   } catch (error) {
-    logger.error('otp_email_failed', error);
-    throw new Error('Could not send OTP email');
+    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const code = axios.isAxiosError(error) ? error.code : undefined;
+    logger.error(`${eventName}_failed`, new Error('Email provider request failed'), {
+      provider,
+      status,
+      code,
+    });
+    throw new Error('Could not send email');
   }
 };
 
-// Function to send password change notification email
+export const sendOTPEmail = async (email: string, otp: string) => {
+  await sendEmail(
+    {
+      to: email,
+      subject: 'Your OTP Code',
+      text: `Your verification code is ${otp}, expires in 10 minutes`,
+    },
+    'otp_email',
+  );
+};
+
 export const sendPasswordChangeNotification = async (email: string) => {
-  try {
-    const mailOptions = {
-      from: process.env.SMTP_FROM_EMAIL, // Sender email address
-      to: email, // Recipient email
+  await sendEmail(
+    {
+      to: email,
       subject: 'Password Changed Successfully',
       text: 'Your password has been changed successfully. If this was not you, please contact support immediately.',
-    };
-
-    await transporter.sendMail(mailOptions);
-    logger.info('password_change_notification_sent');
-  } catch (error) {
-    logger.error('password_change_notification_failed', error);
-    throw new Error('Could not send password change notification');
-  }
+    },
+    'password_change_notification',
+  );
 };

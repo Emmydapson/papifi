@@ -7,7 +7,7 @@ Papafi is an Express/TypeScript fintech backend using PostgreSQL and TypeORM.
 - Node.js, Express, TypeScript
 - PostgreSQL with TypeORM migrations
 - JWT authentication
-- SMTP email OTP
+- Resend API email delivery with optional SMTP provider
 - Maplerad for wallet, virtual account, transfer, card, webhook, and BVN verification flows
 
 ## KYC
@@ -29,13 +29,28 @@ Important production requirements:
 - `JWT_SECRET`
 - `SESSION_SECRET`
 - PostgreSQL connection variables
-- SMTP variables
+- `EMAIL_PROVIDER` (`resend` or `smtp`)
+- `RESEND_API_KEY` when `EMAIL_PROVIDER=resend`, or SMTP connection variables when `EMAIL_PROVIDER=smtp`
+- `SMTP_FROM_EMAIL` (the sender address for either provider)
 - `MAPLERAD_SECRET_KEY`
 - `MAPLERAD_PUBLIC_KEY`
 - `MAPLERAD_WEBHOOK_SECRET`
 - `CORS_ALLOWED_ORIGINS`
 
 Do not commit `.env`, private keys, PEM files, or provider credentials.
+
+## Email Delivery
+
+Resend is the recommended provider because it sends mail over HTTPS rather than SMTP:
+
+```bash
+EMAIL_PROVIDER=resend
+RESEND_API_KEY=re_your_api_key
+SMTP_FROM_EMAIL=noreply@papifi.com
+EMAIL_HTTP_TIMEOUT_MS=10000
+```
+
+The sender address or domain must be verified in Resend. To use the legacy SMTP path explicitly, set `EMAIL_PROVIDER=smtp` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`. SMTP is not initialized or used when the provider is `resend`.
 
 ## Security Notes
 
