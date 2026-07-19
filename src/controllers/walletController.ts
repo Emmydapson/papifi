@@ -4,6 +4,7 @@ import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
 import { VirtualCard } from '../entities/virtualCard';
+import { Transaction } from '../entities/Transaction';
 import { MapleRadService } from '../services/mapleradService';
 import { ledgerService } from '../services/ledgerService';
 import { WebhookEvent } from '../entities/WebhookEvent';
@@ -16,6 +17,7 @@ const mapleRadService = new MapleRadService();
 const userRepo = AppDataSource.getRepository(User);
 const walletRepo = AppDataSource.getRepository(Wallet);
 const cardRepo = AppDataSource.getRepository(VirtualCard);
+const txRepo = AppDataSource.getRepository(Transaction);
 const webhookEventRepo = AppDataSource.getRepository(WebhookEvent);
 
 const cardResponse = (card: VirtualCard) => ({
@@ -57,6 +59,13 @@ const recordWebhookEvent = async (eventData: any) => {
   }
   return false;
 };
+
+const sanitizeProviderSnapshot = (eventData: any) => ({
+  id: eventData?.data?.id,
+  reference: eventData?.reference,
+  status: eventData?.providerStatus || eventData?.data?.status,
+  event: eventData?.event,
+});
 
 const requirePin = async (userId: string, pin?: string) => {
   const user = await userRepo.findOne({ where: { id: userId } });
@@ -351,13 +360,18 @@ router.post('/cards/:id/unfreeze', async (req: Request, res: Response) => {
 
 export const mapleradWebhookHandler = async (req: Request, res: Response) => {
   try {
-    const signature = req.headers[process.env.MAPLERAD_SIGNATURE_HEADER || 'x-maplerad-signature'] as string;
     const rawBody = Buffer.isBuffer(req.body)
       ? req.body.toString('utf8')
       : (req as any).rawBody?.toString('utf8') || JSON.stringify(req.body);
 
-    if (!signature) return res.status(400).json({ ok: false, message: 'Missing signature header' });
-    if (!mapleRadService.verifyWebhookSignature(signature, rawBody)) {
+    const svixId = req.headers['svix-id'] as string | undefined;
+    const svixTimestamp = req.headers['svix-timestamp'] as string | undefined;
+    const svixSignature = req.headers['svix-signature'] as string | undefined;
+
+    if (!svixId || !svixTimestamp || !svixSignature) {
+      return res.status(400).json({ ok: false, message: 'Missing Maplerad webhook signature headers' });
+    }
+    if (!mapleRadService.verifyWebhookSignature({ svixId, svixTimestamp, svixSignature }, rawBody)) {
       return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
     }
 
@@ -389,6 +403,41 @@ export const mapleradWebhookHandler = async (req: Request, res: Response) => {
           return res.status(200).json({ ok: true, duplicate: credit.duplicate === true });
         }
       }
+    }
+
+    if (eventData?.type === 'TRANSFER_EVENT' && eventData.reference) {
+      const duplicate = await recordWebhookEvent(eventData);
+      if (duplicate) return res.status(200).json({ ok: true, duplicate: true });
+
+      const transaction = await AppDataSource.getRepository(Transaction).findOne({
+        where: { provider: 'maplerad', providerReference: eventData.reference },
+      });
+      if (transaction) {
+        const terminal = ['SUCCESS', 'FAILED', 'REVERSED'].includes(transaction.status);
+        if (eventData.event === 'transfer.successful') {
+          if (terminal && transaction.status !== 'SUCCESS') {
+            transaction.reconciliationStatus = 'MISMATCHED';
+            transaction.reconciliationNotes = `Contradictory terminal webhook: ${eventData.event}`;
+            await txRepo.save(transaction);
+            await auditService.log({ action: 'TRANSFER_WEBHOOK_MANUAL_REVIEW', entityType: 'Transaction', entityId: transaction.id, metadata: sanitizeProviderSnapshot(eventData), req });
+          } else {
+            await ledgerService.markExternalSuccess(transaction.id, eventData.reference, eventData.providerStatus, sanitizeProviderSnapshot(eventData));
+            await auditService.log({ action: 'TRANSFER_WEBHOOK_SETTLED', entityType: 'Transaction', entityId: transaction.id, metadata: sanitizeProviderSnapshot(eventData), req });
+          }
+        } else if (eventData.event === 'transfer.failed') {
+          if (terminal && transaction.status === 'SUCCESS') {
+            transaction.reconciliationStatus = 'MISMATCHED';
+            transaction.reconciliationNotes = `Contradictory terminal webhook: ${eventData.event}`;
+            await txRepo.save(transaction);
+            await auditService.log({ action: 'TRANSFER_WEBHOOK_MANUAL_REVIEW', entityType: 'Transaction', entityId: transaction.id, metadata: sanitizeProviderSnapshot(eventData), req });
+          } else {
+            await ledgerService.reverseExternalHold(transaction.id, eventData.providerStatus, sanitizeProviderSnapshot(eventData));
+            await auditService.log({ action: 'TRANSFER_WEBHOOK_REVERSED', entityType: 'Transaction', entityId: transaction.id, metadata: sanitizeProviderSnapshot(eventData), req });
+          }
+        }
+      }
+
+      return res.status(200).json({ ok: true, duplicate: false });
     }
 
     const duplicate = await recordWebhookEvent(eventData);

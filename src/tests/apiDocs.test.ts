@@ -74,7 +74,7 @@ test('GET /swagger.json serves the JSON API document', async () => {
   assert.deepEqual(registerJson?.example, {
     firstName: 'Ada',
     lastName: 'Okafor',
-    email: 'ada.okafor@example.com',
+    email: 'ada.okafor@operator-controlled-domain.tld',
     password: 'DOCS_ONLY_PASSWORD',
     gender: 'female',
     phoneNumber: '+2348012345678',

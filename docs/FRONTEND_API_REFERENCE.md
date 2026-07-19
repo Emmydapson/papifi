@@ -19,7 +19,9 @@ The backend source defaults to `PORT=5000` when `PORT` is not configured. Use th
 | `Content-Type: application/json` | Yes for JSON requests | All JSON endpoints | Webhook signing depends on the exact raw JSON body received by the server. |
 | `Authorization: Bearer <jwt>` | Yes for authenticated routes | Profile, KYC, wallet, cards, transactions, admin | JWT is returned by account OTP verification and login. |
 | `Idempotency-Key: <unique-key>` | Yes for money movement | Withdrawals, internal transfers, card funding, card withdrawal | Minimum 8 characters. The backend also accepts `idempotencyKey` in the JSON body as a fallback. |
-| `x-maplerad-signature` | Yes | `POST /api/wallet/webhook` | Provider callback only. Header name can be changed with `MAPLERAD_SIGNATURE_HEADER`. |
+| `svix-id` | Yes | `POST /api/wallet/webhook` | Provider callback only. Maplerad webhook message ID. |
+| `svix-timestamp` | Yes | `POST /api/wallet/webhook` | Provider callback only. Unix timestamp used for replay protection. |
+| `svix-signature` | Yes | `POST /api/wallet/webhook` | Provider callback only. Maplerad/Svix HMAC-SHA256 signature list. |
 
 Never log passwords, OTPs, transaction PINs, BVNs, card PANs, CVVs, bearer tokens, or provider webhook payloads.
 
@@ -31,13 +33,13 @@ All sensitive-looking values below are documentation-only placeholders. Replace 
 
 ```json
 {
-  "POST /api/auth/register": { "firstName": "Ada", "lastName": "Okafor", "email": "ada.okafor@example.com", "password": "DOCS_ONLY_PASSWORD", "gender": "female", "phoneNumber": "+2348012345678" },
-  "POST /api/auth/verify-otp": { "email": "ada.okafor@example.com", "otp": "000000" },
-  "POST /api/auth/login": { "email": "ada.okafor@example.com", "password": "DOCS_ONLY_PASSWORD" },
-  "POST /api/auth/resend-otp": { "email": "ada.okafor@example.com" },
-  "POST /api/auth/forgot-password": { "email": "ada.okafor@example.com" },
-  "POST /api/auth/reset-passwordOtp": { "email": "ada.okafor@example.com", "otp": "000000" },
-  "POST /api/auth/reset-password": { "email": "ada.okafor@example.com", "otp": "000000", "newPassword": "DOCS_ONLY_NEW_PASSWORD" },
+  "POST /api/auth/register": { "firstName": "Ada", "lastName": "Okafor", "email": "ada.okafor@operator-controlled-domain.tld", "password": "DOCS_ONLY_PASSWORD", "gender": "female", "phoneNumber": "+2348012345678" },
+  "POST /api/auth/verify-otp": { "email": "ada.okafor@operator-controlled-domain.tld", "otp": "000000" },
+  "POST /api/auth/login": { "email": "ada.okafor@operator-controlled-domain.tld", "password": "DOCS_ONLY_PASSWORD" },
+  "POST /api/auth/resend-otp": { "email": "ada.okafor@operator-controlled-domain.tld" },
+  "POST /api/auth/forgot-password": { "email": "ada.okafor@operator-controlled-domain.tld" },
+  "POST /api/auth/reset-passwordOtp": { "email": "ada.okafor@operator-controlled-domain.tld", "otp": "000000" },
+  "POST /api/auth/reset-password": { "email": "ada.okafor@operator-controlled-domain.tld", "otp": "000000", "newPassword": "DOCS_ONLY_NEW_PASSWORD" },
   "POST /api/auth/create-pin": { "pin": "0000" },
   "PUT /api/profile": { "gender": "female", "phoneNumber": "+2348012345678", "country": "NG", "nationality": "Nigerian", "dateOfBirth": "1995-04-12", "address": "12 Example Road, Lagos" },
   "PUT /api/profile/change-password": { "currentPassword": "DOCS_ONLY_CURRENT_PASSWORD", "newPassword": "DOCS_ONLY_NEW_PASSWORD" }
@@ -74,12 +76,12 @@ The following commands consume no fields; their documented optional payload is `
 
 ### Maplerad Webhook
 
-This provider-only example requires `x-maplerad-signature: DOCS_ONLY_HMAC_SIGNATURE`. The backend verifies the signature against the exact raw JSON bytes.
+This provider-only example requires `svix-id`, `svix-timestamp`, and `svix-signature`. The backend verifies the signature against the exact raw JSON bytes and rejects stale timestamps.
 
 ```json
 {
   "id": "evt_docs_01",
-  "event": "collections.virtual_account.deposit",
+  "event": "collection.successful",
   "data": {
     "reference": "deposit_docs_01",
     "customer_id": "customer_docs_01",
@@ -202,7 +204,7 @@ Maplerad calls:
 
 | Method | Path | Auth | Headers | Purpose |
 | --- | --- | --- | --- | --- |
-| `POST` | `/api/wallet/webhook` | No user auth | `x-maplerad-signature` | Provider callback for deposits, USD account approval, and other provider events. |
+| `POST` | `/api/wallet/webhook` | No user auth | `svix-id`, `svix-timestamp`, `svix-signature` | Provider callback for deposits, USD account approval, transfer status, card issuing events, and other provider events. |
 
 The webhook verifies the provider signature over the raw request body. For deposits, the backend credits the matching wallet through the ledger and returns `{ "ok": true, "duplicate": false }`, `{ "ok": true, "duplicate": true }`, or `{ "ok": true, "ignored": true }`.
 
@@ -407,7 +409,10 @@ Do not reuse one idempotency key across different endpoints, amounts, wallets, c
 
 ## Sandbox and Staging Testing Checklist
 
-- Register a new user with a unique email and E.164 phone number.
+- Set `SMOKE_TEST_EMAIL` to a real operator-controlled inbox before running registration/auth smoke tests. Do not use `example.com`, `example.org`, `example.net`, `test.com`, `localhost`, or fabricated recipients.
+- Set `SMOKE_TEST_PHONE` to an explicit E.164 phone number before registration/auth smoke tests.
+- Confirm the backend sender is configured on the verified domain with `SMTP_FROM_EMAIL=noreply@mail.papifi.com`.
+- Register a new user with the supplied email and E.164 phone number.
 - Verify account OTP and confirm JWT is returned.
 - Create transaction PIN.
 - Login and confirm `userId` is available for wallet paths.
@@ -422,3 +427,20 @@ Do not reuse one idempotency key across different endpoints, amounts, wallets, c
 - Simulate or wait for Maplerad webhook delivery in staging; do not call provider webhook from the app.
 - Verify transaction history filters by wallet, card, date range, and sent/received type.
 - For admin builds, verify audit logs, risk flags, reconciliation queue, manual review, and user wallet summary with an admin token.
+
+When neither `SMOKE_TEST_EMAIL` nor `TEST_USER_TOKEN` is supplied, the smoke test skips registration, OTP, login, PIN, KYC, wallet, transaction, and normal-user admin rejection checks. That skip is expected and must not be treated as an email-provider failure.
+
+## Controlled Live Maplerad Testing
+
+Live provider-affecting smoke tests are opt-in. Leave `MAPLERAD_LIVE_TESTS_ENABLED=false` unless an authorized operator has approved live customer, KYC, and virtual-account checks.
+
+Required opt-in variables:
+
+| Variable | Purpose |
+| --- | --- |
+| `MAPLERAD_LIVE_TESTS_ENABLED` | Must be `true` before staging smoke tests call live KYC or virtual-account creation routes. |
+| `MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL` | Authorized test customer email. |
+| `MAPLERAD_LIVE_TEST_PHONE` | Authorized test customer phone. |
+| `MAPLERAD_LIVE_TEST_BVN` | Authorized test BVN. BVN tests are skipped unless this is supplied with opt-in enabled. |
+
+`npm run maplerad:readiness` performs only non-destructive provider checks by default. It does not run transfers, deposits, card funding, card withdrawals, or unauthorized identity checks.

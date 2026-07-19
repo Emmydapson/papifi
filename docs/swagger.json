@@ -137,7 +137,7 @@
               "example": {
                 "firstName": "Ada",
                 "lastName": "Okafor",
-                "email": "ada.okafor@example.com",
+                "email": "ada.okafor@operator-controlled-domain.tld",
                 "password": "DOCS_ONLY_PASSWORD",
                 "gender": "female",
                 "phoneNumber": "+2348012345678"
@@ -173,7 +173,7 @@
                 "$ref": "#/components/schemas/OtpVerifyRequest"
               },
               "example": {
-                "email": "ada.okafor@example.com",
+                "email": "ada.okafor@operator-controlled-domain.tld",
                 "otp": "000000"
               }
             }
@@ -211,7 +211,7 @@
                 "$ref": "#/components/schemas/LoginRequest"
               },
               "example": {
-                "email": "ada.okafor@example.com",
+                "email": "ada.okafor@operator-controlled-domain.tld",
                 "password": "DOCS_ONLY_PASSWORD"
               }
             }
@@ -249,7 +249,7 @@
                 "$ref": "#/components/schemas/EmailRequest"
               },
               "example": {
-                "email": "ada.okafor@example.com"
+                "email": "ada.okafor@operator-controlled-domain.tld"
               }
             }
           }
@@ -394,7 +394,7 @@
                 "$ref": "#/components/schemas/EmailRequest"
               },
               "example": {
-                "email": "ada.okafor@example.com"
+                "email": "ada.okafor@operator-controlled-domain.tld"
               }
             }
           }
@@ -428,7 +428,7 @@
                 "$ref": "#/components/schemas/ResetPasswordRequest"
               },
               "example": {
-                "email": "ada.okafor@example.com",
+                "email": "ada.okafor@operator-controlled-domain.tld",
                 "otp": "000000",
                 "newPassword": "DOCS_ONLY_NEW_PASSWORD"
               }
@@ -460,7 +460,7 @@
                 "$ref": "#/components/schemas/OtpVerifyRequest"
               },
               "example": {
-                "email": "ada.okafor@example.com",
+                "email": "ada.okafor@operator-controlled-domain.tld",
                 "otp": "000000"
               }
             }
@@ -736,11 +736,17 @@
           "Webhooks"
         ],
         "summary": "Maplerad provider callback",
-        "description": "Unauthenticated provider callback. Authenticity is checked with the configured Maplerad signature header over the raw body. Provider private payloads are not documented.",
+        "description": "Unauthenticated provider callback. Authenticity is checked with Maplerad/Svix svix-id, svix-timestamp, and svix-signature headers over the exact raw body. Provider private payloads are not documented.",
         "security": [],
         "parameters": [
           {
-            "$ref": "#/components/parameters/MapleradSignature"
+            "$ref": "#/components/parameters/SvixId"
+          },
+          {
+            "$ref": "#/components/parameters/SvixTimestamp"
+          },
+          {
+            "$ref": "#/components/parameters/SvixSignature"
           }
         ],
         "requestBody": {
@@ -752,7 +758,7 @@
               },
               "example": {
                 "id": "evt_docs_01",
-                "event": "collections.virtual_account.deposit",
+                "event": "collection.successful",
                 "data": {
                   "reference": "deposit_docs_01",
                   "customer_id": "customer_docs_01",
@@ -1598,16 +1604,6 @@
         },
         "example": "money_move_docs_01"
       },
-      "MapleradSignature": {
-        "name": "x-maplerad-signature",
-        "in": "header",
-        "required": true,
-        "description": "Maplerad HMAC signature header. Actual header name can be changed by MAPLERAD_SIGNATURE_HEADER.",
-        "schema": {
-          "type": "string"
-        },
-        "example": "DOCS_ONLY_HMAC_SIGNATURE"
-      },
       "UserIdPath": {
         "name": "userId",
         "in": "path",
@@ -1646,6 +1642,36 @@
           "maximum": 100,
           "default": 50
         }
+      },
+      "SvixId": {
+        "name": "svix-id",
+        "in": "header",
+        "required": true,
+        "description": "Maplerad webhook message identifier. Reused when the same webhook is retried.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "msg_docs_01"
+      },
+      "SvixTimestamp": {
+        "name": "svix-timestamp",
+        "in": "header",
+        "required": true,
+        "description": "Unix timestamp in seconds used for replay protection.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "1760000000"
+      },
+      "SvixSignature": {
+        "name": "svix-signature",
+        "in": "header",
+        "required": true,
+        "description": "Space-delimited Maplerad/Svix HMAC-SHA256 signatures, usually prefixed with a version such as v1,.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "v1,DOCS_ONLY_SIGNATURE"
       }
     },
     "responses": {
@@ -1772,7 +1798,7 @@
           "email": {
             "type": "string",
             "format": "email",
-            "example": "ada@example.com"
+            "example": "ada.okafor@operator-controlled-domain.tld"
           },
           "password": {
             "type": "string",
@@ -1798,7 +1824,7 @@
           "email": {
             "type": "string",
             "format": "email",
-            "example": "ada@example.com"
+            "example": "ada.okafor@operator-controlled-domain.tld"
           },
           "password": {
             "type": "string",
@@ -1815,7 +1841,7 @@
           "email": {
             "type": "string",
             "format": "email",
-            "example": "ada@example.com"
+            "example": "ada.okafor@operator-controlled-domain.tld"
           }
         }
       },

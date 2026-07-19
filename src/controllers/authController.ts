@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import jwt from 'jsonwebtoken';
-import { sendOTPEmail } from '../services/emailNotification';
+import { EmailProviderError, sendOTPEmail } from '../services/emailNotification';
 import { auditService } from '../services/auditService';
 import { logger } from '../services/logger';
 
@@ -25,6 +25,17 @@ const sendOtpIfRequired = async (email: string, otp: string) => {
     return;
   }
   await sendOTPEmail(email, otp);
+};
+
+const emailProviderFailureResponse = (res: Response, error: unknown) => {
+  if (error instanceof EmailProviderError) {
+    const status = error.code === 'TEST_DATA_INVALID' ? 400 : 502;
+    return res.status(status).json({
+      message: 'Unable to send OTP email.',
+      code: error.code,
+    });
+  }
+  return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
 };
 
 const hashOtp = (otp: string) => bcrypt.hash(otp, 10);
@@ -81,7 +92,7 @@ export const registerUser = async (req: Request, res: Response) => {
 
   } catch (error) {
     logger.error('registration_otp_send_failed', error, { requestId: (req as any).id });
-    return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
+    return emailProviderFailureResponse(res, error);
   }
 };
 
@@ -158,7 +169,7 @@ export const resendOtp = async (req: Request, res: Response) => {
     res.status(200).json({ message: 'A new OTP has been sent to your email. Please check and verify.' });
   } catch (error) {
     logger.error('otp_resend_failed', error, { requestId: (req as any).id });
-    return res.status(500).json({ message: 'An error occurred while sending the new OTP. Please try again later.' });
+    return emailProviderFailureResponse(res, error);
   }
 };
 
@@ -248,7 +259,7 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
     res.status(200).json({ message: GENERIC_OTP_RESPONSE });
   } catch (error) {
     logger.error('password_reset_otp_send_failed', error, { requestId: (req as any).id });
-    return res.status(500).json({ message: 'An error occurred while sending the OTP. Please try again later.' });
+    return emailProviderFailureResponse(res, error);
   }
 };
 

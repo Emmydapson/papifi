@@ -7,6 +7,8 @@ This smoke test exercises deployed Papafi API endpoints from a frontend/mobile i
 | Env var | Required | Purpose |
 | --- | --- | --- |
 | `STAGING_BASE_URL` | Yes | API base URL, for example `https://api-staging.papifi.com`, `https://api.papifi.com`, or `http://localhost:5000`. |
+| `SMOKE_TEST_EMAIL` | For registration/auth flows | Real operator-controlled inbox. The script does not generate fake recipients and rejects reserved domains such as `example.com`, `example.org`, `example.net`, `test.com`, and `localhost`. |
+| `SMOKE_TEST_PHONE` | For registration/auth flows | Explicit E.164 phone number, for example `+2348012340000`. The script does not generate random production phone numbers. |
 
 ## Optional Env Vars
 
@@ -17,16 +19,21 @@ This smoke test exercises deployed Papafi API endpoints from a frontend/mobile i
 | `TEST_OTP_CODE` | Backend staging/dev OTP code used only when `ENABLE_TEST_OTP_BYPASS=true` and `NODE_ENV` is not `production`. The smoke test also reads this as an OTP input when provided. |
 | `TEST_USER_TOKEN` | Skips registration, OTP verification, and login; continues authenticated checks with an existing normal user token. |
 | `TEST_USER_ID` | Required only when `TEST_USER_TOKEN` cannot be decoded locally. |
-| `SMOKE_TEST_EMAIL` | Overrides generated test email. |
-| `SMOKE_TEST_EMAIL_DOMAIN` | Domain for generated test emails. Defaults to `example.com`. |
-| `SMOKE_TEST_PHONE` | Overrides generated Nigerian E.164 test phone number. Must include country code, for example `+2348012340000`. |
+| `SMOKE_TEST_EMAIL_PREFIX` | Optional plus-addressing tag prefix. Used only with `SMOKE_TEST_RUN_ID`/generated run id to create `base+prefix-runid@domain`. Set only when the supplied inbox/domain supports plus-addressing. |
+| `SMOKE_TEST_RUN_ID` | Optional stable run id for plus-addressing and webhook mock IDs. |
 | `SMOKE_TEST_PASSWORD` | Overrides generated test password. Do not use a real user password. |
 | `SMOKE_TEST_PIN` | Overrides the test transaction PIN. Do not use a real user PIN. |
-| `MAPLERAD_SANDBOX_BVN` or `SMOKE_TEST_BVN` | Enables BVN KYC check with an explicit Maplerad sandbox/test identity. |
+| `MAPLERAD_LIVE_TESTS_ENABLED` | Must be `true` before the smoke test calls live provider-affecting KYC or virtual-account routes. Defaults to skipped. |
+| `MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL`, `MAPLERAD_LIVE_TEST_PHONE`, `MAPLERAD_LIVE_TEST_BVN` | Enables BVN KYC check with explicit authorized test identity data. |
 | `MAPLERAD_WEBHOOK_SECRET` or `SMOKE_MAPLERAD_WEBHOOK_SECRET` | Enables signed mock Maplerad webhook and duplicate webhook checks. |
-| `MAPLERAD_SIGNATURE_HEADER` | Overrides webhook signature header. Defaults to `x-maplerad-signature`. |
 
-Do not use live Maplerad keys or real identity values for smoke testing.
+Do not use fake recipient domains such as `example.com` or `test.com`. Resend rejects those recipients. Use an operator-controlled inbox only, and use plus-addressing only when that inbox/domain is known to support it.
+
+The deployed email sender must use the verified domain:
+
+```text
+SMTP_FROM_EMAIL=noreply@mail.papifi.com
+```
 
 ## How To Run
 
@@ -34,12 +41,26 @@ Against deployed staging:
 
 ```powershell
 $env:STAGING_BASE_URL = "https://api-staging.papifi.com"
+$env:SMOKE_TEST_EMAIL = "operator-controlled-inbox@your-verified-domain.tld"
+$env:SMOKE_TEST_PHONE = "+2348012340000"
 $env:ENABLE_TEST_OTP_BYPASS = "true"
 $env:TEST_OTP_CODE = "<safe-dev-otp-code>"
-$env:MAPLERAD_SANDBOX_BVN = "<maplerad-sandbox-bvn>"
 $env:MAPLERAD_WEBHOOK_SECRET = "<staging-webhook-secret>"
 npm run smoke:staging
 ```
+
+With explicit plus-addressing:
+
+```powershell
+$env:STAGING_BASE_URL = "https://api-staging.papifi.com"
+$env:SMOKE_TEST_EMAIL = "operator-controlled-inbox@your-verified-domain.tld"
+$env:SMOKE_TEST_EMAIL_PREFIX = "papafi"
+$env:SMOKE_TEST_RUN_ID = "20260719-01"
+$env:SMOKE_TEST_PHONE = "+2348012340000"
+npm run smoke:staging
+```
+
+This registers `operator-controlled-inbox+papafi-20260719-01@your-verified-domain.tld`. Do not set `SMOKE_TEST_EMAIL_PREFIX` or `SMOKE_TEST_RUN_ID` unless the inbox supports plus-addressing. Without those variables, the script uses `SMOKE_TEST_EMAIL` exactly as supplied.
 
 Against local backend:
 
@@ -56,6 +77,8 @@ $env:TEST_USER_TOKEN = "<normal-user-jwt>"
 npm run smoke:staging
 ```
 
+When `SMOKE_TEST_EMAIL` is absent and no `TEST_USER_TOKEN` is supplied, the script runs only unauthenticated safe checks, skips registration/OTP/login/PIN/KYC/wallet/transaction/admin checks, and does not call the email provider.
+
 ## Expected Output
 
 The script prints one line per step:
@@ -71,10 +94,20 @@ Elapsed: 8.4s
 ```
 
 Failures include the endpoint, status code, and sanitized response body. Sensitive fields such as tokens, OTPs, PINs, BVNs, signatures, passwords, account numbers, PANs, and CVVs are redacted from output.
+Email addresses and phone numbers are masked in console output.
+
+Email-provider failures are classified as:
+
+| Code | Meaning |
+| --- | --- |
+| `TEST_DATA_INVALID` | Resend rejected a reserved or invalid recipient, commonly status `422` invalid `to`. |
+| `EMAIL_PROVIDER_AUTH_FAILED` | Resend/API credentials are missing, invalid, revoked, or unauthorized. |
+| `EMAIL_SENDER_NOT_VERIFIED` | The configured sender/domain is not verified. Confirm `SMTP_FROM_EMAIL` uses `mail.papifi.com`. |
+| `EMAIL_PROVIDER_UNAVAILABLE` | Network, timeout, or provider availability failure. |
 
 ## Manual OTP Fallback
 
-If no safe OTP bypass is configured, the script registers a unique test user, stops after registration, and prints a manual action:
+If no safe OTP bypass is configured, the script registers the provided test inbox, stops after registration, and prints a manual action:
 
 ```text
 MANUAL POST /api/auth/verify-otp - No TEST_OTP/DEV_TEST_OTP/SMOKE_TEST_OTP provided...
@@ -126,7 +159,7 @@ Admin endpoints are expected to return `401` or `403` for a normal user token.
 
 ## Maplerad Sandbox Notes
 
-BVN KYC is tested only when `MAPLERAD_SANDBOX_BVN` or `SMOKE_TEST_BVN` is provided. Use only Maplerad sandbox/test identity values approved for staging.
+BVN KYC is tested only when `MAPLERAD_LIVE_TESTS_ENABLED=true` and all authorized live test identity variables are supplied. Use only explicit test identity values approved for staging/live verification.
 
 The webhook test does not use a provider-private payload and does not simulate a deposit. It sends a signed non-money mock event (`smoke.test`) to confirm:
 

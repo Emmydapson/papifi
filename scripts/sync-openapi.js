@@ -44,9 +44,47 @@ document.components.schemas.MapleradWebhookRequest = {
 document.paths['/api/wallet/webhook'].post.requestBody.content['application/json'].schema = {
   $ref: '#/components/schemas/MapleradWebhookRequest',
 };
+document.paths['/api/wallet/webhook'].post.description =
+  'Unauthenticated provider callback. Authenticity is checked with Maplerad/Svix svix-id, svix-timestamp, and svix-signature headers over the exact raw body. Provider private payloads are not documented.';
+document.paths['/api/wallet/webhook'].post.parameters = [
+  { $ref: '#/components/parameters/SvixId' },
+  { $ref: '#/components/parameters/SvixTimestamp' },
+  { $ref: '#/components/parameters/SvixSignature' },
+];
 
 document.components.parameters.IdempotencyKey.example = 'money_move_docs_01';
-document.components.parameters.MapleradSignature.example = 'DOCS_ONLY_HMAC_SIGNATURE';
+delete document.components.parameters.MapleradSignature;
+document.components.parameters.SvixId = {
+  name: 'svix-id',
+  in: 'header',
+  required: true,
+  description: 'Maplerad webhook message identifier. Reused when the same webhook is retried.',
+  schema: { type: 'string' },
+  example: 'msg_docs_01',
+};
+document.components.parameters.SvixTimestamp = {
+  name: 'svix-timestamp',
+  in: 'header',
+  required: true,
+  description: 'Unix timestamp in seconds used for replay protection.',
+  schema: { type: 'string' },
+  example: '1760000000',
+};
+document.components.parameters.SvixSignature = {
+  name: 'svix-signature',
+  in: 'header',
+  required: true,
+  description: 'Space-delimited Maplerad/Svix HMAC-SHA256 signatures, usually prefixed with a version such as v1,.',
+  schema: { type: 'string' },
+  example: 'v1,DOCS_ONLY_SIGNATURE',
+};
+
+const docsEmailExample = 'ada.okafor@operator-controlled-domain.tld';
+for (const schemaName of ['RegisterRequest', 'LoginRequest', 'EmailRequest']) {
+  if (document.components.schemas[schemaName]?.properties?.email) {
+    document.components.schemas[schemaName].properties.email.example = docsEmailExample;
+  }
+}
 
 // Keep the documented profile payload aligned with profileService.updateProfile.
 document.components.schemas.ProfileUpdateRequest = {

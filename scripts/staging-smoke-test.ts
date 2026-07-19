@@ -23,15 +23,16 @@ const testPin = process.env.SMOKE_TEST_PIN || String(crypto.randomInt(1000, 1000
 const testOtp = process.env.TEST_OTP || process.env.DEV_TEST_OTP || process.env.SMOKE_TEST_OTP || process.env.TEST_OTP_CODE;
 const tokenOverride = process.env.TEST_USER_TOKEN;
 const explicitUserId = process.env.TEST_USER_ID;
-const sandboxBvn = process.env.MAPLERAD_SANDBOX_BVN || process.env.SMOKE_TEST_BVN;
+const liveProviderTestsEnabled = process.env.MAPLERAD_LIVE_TESTS_ENABLED === 'true';
+const liveTestBvn = process.env.MAPLERAD_LIVE_TEST_BVN;
+const liveTestPhone = process.env.MAPLERAD_LIVE_TEST_PHONE;
+const liveTestCustomerEmail = process.env.MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL;
 const webhookSecret = process.env.MAPLERAD_WEBHOOK_SECRET || process.env.SMOKE_MAPLERAD_WEBHOOK_SECRET;
-const webhookHeader = process.env.MAPLERAD_SIGNATURE_HEADER || 'x-maplerad-signature';
 
 const startedAt = Date.now();
-const runId = Date.now().toString(36);
-const emailDomain = process.env.SMOKE_TEST_EMAIL_DOMAIN || 'example.com';
-const testEmail = process.env.SMOKE_TEST_EMAIL || `papafi.smoke.${runId}@${emailDomain}`;
-const testPhone = process.env.SMOKE_TEST_PHONE || `+234801234${String(Date.now()).slice(-4)}`;
+const runId = process.env.SMOKE_TEST_RUN_ID || Date.now().toString(36);
+const testEmail = buildSmokeEmail();
+const testPhone = process.env.SMOKE_TEST_PHONE;
 const results: StepResult[] = [];
 
 let authToken = tokenOverride || '';
@@ -58,6 +59,59 @@ function decodeJwtUserId(token: string): string {
   }
 }
 
+function maskEmail(email?: string): string {
+  if (!email) return 'not provided';
+  const [local, domain] = email.split('@');
+  if (!local || !domain) return '[invalid-email]';
+  const visible = local.slice(0, 2);
+  return `${visible}${'*'.repeat(Math.max(3, local.length - visible.length))}@${domain}`;
+}
+
+function maskPhone(phone?: string): string {
+  if (!phone) return 'not provided';
+  return `${phone.slice(0, 3)}${'*'.repeat(Math.max(4, phone.length - 6))}${phone.slice(-3)}`;
+}
+
+function validateEmail(email: string): string {
+  const normalized = email.trim().toLowerCase();
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailPattern.test(normalized)) {
+    throw new Error('SMOKE_TEST_EMAIL must be a syntactically valid email address.');
+  }
+
+  const domain = normalized.split('@')[1];
+  const reservedDomains = new Set(['example.com', 'example.org', 'example.net', 'test.com', 'localhost']);
+  if (reservedDomains.has(domain)) {
+    throw new Error(`SMOKE_TEST_EMAIL uses reserved domain ${domain}. Provide a real operator-controlled inbox.`);
+  }
+
+  return normalized;
+}
+
+function buildSmokeEmail(): string | undefined {
+  const supplied = process.env.SMOKE_TEST_EMAIL;
+  if (!supplied) return undefined;
+
+  const normalized = validateEmail(supplied);
+  const prefix = process.env.SMOKE_TEST_EMAIL_PREFIX;
+  const explicitRunId = process.env.SMOKE_TEST_RUN_ID;
+  if (!prefix && !explicitRunId) return normalized;
+
+  const [local, domain] = normalized.split('@');
+  const baseLocal = local.split('+')[0];
+  const tagPrefix = prefix || 'papafi';
+  const tagRunId = explicitRunId || runId;
+  return validateEmail(`${baseLocal}+${tagPrefix}-${tagRunId}@${domain}`);
+}
+
+function validatePhone(phone?: string): string {
+  if (!phone) throw new Error('SMOKE_TEST_PHONE is required for registration tests.');
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+    throw new Error('SMOKE_TEST_PHONE must be an explicit E.164 phone number, for example +2348012340000.');
+  }
+  return phone;
+}
+
 function redact(value: any): any {
   if (Array.isArray(value)) return value.map(redact);
   if (!value || typeof value !== 'object') return value;
@@ -72,6 +126,8 @@ function redact(value: any): any {
         normalized.includes('otp') ||
         normalized.includes('bvn') ||
         normalized.includes('secret') ||
+        normalized.includes('email') ||
+        normalized.includes('phone') ||
         normalized.includes('authorization') ||
         normalized.includes('signature') ||
         normalized.includes('accountnumber') ||
@@ -90,6 +146,26 @@ function redact(value: any): any {
 function safeString(value: any): string {
   if (typeof value === 'string') return value.slice(0, 500);
   return JSON.stringify(redact(value), null, 2).slice(0, 1200);
+}
+
+function classifyEmailFailure(response: SmokeResponse): string | undefined {
+  const code = String((response.data as any)?.code || '');
+  const message = String((response.data as any)?.message || '').toLowerCase();
+
+  if (code) return code;
+  if ((response.status === 400 || response.status === 422) && (message.includes('invalid') || message.includes('recipient') || message.includes('to'))) {
+    return 'TEST_DATA_INVALID';
+  }
+  if ((response.status === 401 || response.status === 403) || message.includes('api key') || message.includes('unauthorized')) {
+    return 'EMAIL_PROVIDER_AUTH_FAILED';
+  }
+  if (message.includes('sender') || message.includes('domain') || message.includes('verified') || message.includes('from')) {
+    return 'EMAIL_SENDER_NOT_VERIFIED';
+  }
+  if (response.status === 502 || response.status === 503 || response.status === 504 || message.includes('timeout') || message.includes('network')) {
+    return 'EMAIL_PROVIDER_UNAVAILABLE';
+  }
+  return undefined;
 }
 
 async function request<T = any>(
@@ -162,10 +238,69 @@ function manual(name: string, detail: string) {
   console.log(`- ${name} ... MANUAL (${detail})`);
 }
 
+async function runWebhookChecks() {
+  if (webhookSecret) {
+    const payload = JSON.stringify({
+      id: `smoke_evt_${runId}`,
+      event: 'smoke.test',
+      data: {
+        reference: `smoke_ref_${runId}`,
+        status: 'sandbox',
+      },
+    });
+    const svixId = `msg_${runId}`;
+    const svixTimestamp = String(Math.floor(Date.now() / 1000));
+    const secret = webhookSecret.startsWith('whsec_') ? webhookSecret.split('_')[1] : webhookSecret;
+    const signature = crypto
+      .createHmac('sha256', Buffer.from(secret, 'base64'))
+      .update(`${svixId}.${svixTimestamp}.${payload}`)
+      .digest('base64');
+
+    await step('POST /api/wallet/webhook signed mock event', async () => {
+      const res = await request('POST', '/api/wallet/webhook', {
+        body: payload,
+        headers: { 'svix-id': svixId, 'svix-timestamp': svixTimestamp, 'svix-signature': `v1,${signature}` },
+        expected: [200],
+      });
+      if (res.data?.ok !== true) throw new Error(`Unexpected webhook response: ${safeString(res.data)}`);
+    });
+
+    await step('POST /api/wallet/webhook duplicate signed mock event', async () => {
+      const res = await request('POST', '/api/wallet/webhook', {
+        body: payload,
+        headers: { 'svix-id': svixId, 'svix-timestamp': svixTimestamp, 'svix-signature': `v1,${signature}` },
+        expected: [200],
+      });
+      if (res.data?.ok !== true || res.data?.duplicate !== true) {
+        throw new Error(`Expected duplicate webhook response: ${safeString(res.data)}`);
+      }
+    });
+  } else {
+    skip('POST /api/wallet/webhook signed mock event', 'MAPLERAD_WEBHOOK_SECRET/SMOKE_MAPLERAD_WEBHOOK_SECRET not provided');
+    skip('POST /api/wallet/webhook duplicate signed mock event', 'MAPLERAD_WEBHOOK_SECRET/SMOKE_MAPLERAD_WEBHOOK_SECRET not provided');
+  }
+}
+
+function skipAuthenticatedChecks(reason: string) {
+  skip('POST /api/auth/register', reason);
+  skip('POST /api/auth/verify-otp', reason);
+  skip('POST /api/auth/login', reason);
+  skip('POST /api/auth/create-pin', reason);
+  skip('POST /api/kyc/bvn', reason);
+  skip('POST /api/kyc/documents', reason);
+  skip('POST /api/wallet/create/{userId}', reason);
+  skip('POST /api/wallet/create-usd/{userId}', reason);
+  skip('GET /api/wallet/balance/{userId}', reason);
+  skip('GET /api/transaction', reason);
+  skip('Idempotency requirement on withdrawal without money movement', reason);
+  skip('Admin endpoints reject normal user token', reason);
+}
+
 async function main() {
   console.log(`Papafi staging smoke test`);
   console.log(`Base URL: ${baseUrl}`);
-  console.log(`Test email: ${testEmail}`);
+  console.log(`Test email: ${maskEmail(testEmail)}`);
+  console.log(`Test phone: ${maskPhone(testPhone)}`);
 
   await step('GET /health', async () => {
     const res = await request('GET', '/health');
@@ -177,19 +312,33 @@ async function main() {
     if (res.data?.status !== 'ready') throw new Error(`Unexpected readiness response: ${safeString(res.data)}`);
   });
 
+  if (!authToken && !testEmail) {
+    const reason = 'SMOKE_TEST_EMAIL is not set; email-dependent registration/authenticated checks skipped without exercising the email provider';
+    skipAuthenticatedChecks(reason);
+    await runWebhookChecks();
+    printSummary();
+    return;
+  }
+
   if (!authToken) {
+    const registrationPhone = validatePhone(testPhone);
+
     await step('POST /api/auth/register', async () => {
-      await request('POST', '/api/auth/register', {
+      const res = await request('POST', '/api/auth/register', {
         body: {
           firstName: 'Papafi',
           lastName: 'Smoke',
           email: testEmail,
           password: testPassword,
           gender: 'test',
-          phoneNumber: testPhone,
+          phoneNumber: registrationPhone,
         },
-        expected: [200],
+        expected: [200, 400, 422, 500, 502, 503, 504],
       });
+      if (res.status !== 200) {
+        const classification = classifyEmailFailure(res);
+        throw new Error(`${classification || 'REGISTRATION_FAILED'}: POST /api/auth/register returned ${res.status}. Response: ${safeString(res.data)}`);
+      }
     });
 
     if (!testOtp) {
@@ -240,18 +389,21 @@ async function main() {
     });
   });
 
-  if (sandboxBvn) {
+  if (liveProviderTestsEnabled && liveTestBvn && liveTestPhone && liveTestCustomerEmail) {
     await step('POST /api/kyc/bvn', async () => {
       const res = await request('POST', '/api/kyc/bvn', {
         token: authToken,
-        body: { bvn: sandboxBvn },
+        body: { bvn: liveTestBvn },
         expected: [200, 502],
       });
       if (res.status === 502) throw new Error(`Maplerad sandbox BVN verification failed: ${safeString(res.data)}`);
       return `status=${res.data?.status || 'unknown'}`;
     });
   } else {
-    skip('POST /api/kyc/bvn', 'MAPLERAD_SANDBOX_BVN/SMOKE_TEST_BVN not provided');
+    skip(
+      'POST /api/kyc/bvn',
+      'requires MAPLERAD_LIVE_TESTS_ENABLED=true plus MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL, MAPLERAD_LIVE_TEST_PHONE, and MAPLERAD_LIVE_TEST_BVN'
+    );
   }
 
   await step('POST /api/kyc/documents', async () => {
@@ -269,22 +421,27 @@ async function main() {
     });
   });
 
-  await step('POST /api/wallet/create/{userId}', async () => {
-    const res = await request<any>('POST', `/api/wallet/create/${userId}`, {
-      token: authToken,
-      expected: [200, 201],
+  if (liveProviderTestsEnabled) {
+    await step('POST /api/wallet/create/{userId}', async () => {
+      const res = await request<any>('POST', `/api/wallet/create/${userId}`, {
+        token: authToken,
+        expected: [200, 201],
+      });
+      walletId = res.data?.wallet?.id;
+      if (!walletId) throw new Error(`Wallet response did not include wallet.id: ${safeString(res.data)}`);
+      return `walletId=${walletId}`;
     });
-    walletId = res.data?.wallet?.id;
-    if (!walletId) throw new Error(`Wallet response did not include wallet.id: ${safeString(res.data)}`);
-    return `walletId=${walletId}`;
-  });
 
-  await step('POST /api/wallet/create-usd/{userId}', async () => {
-    await request('POST', `/api/wallet/create-usd/${userId}`, {
-      token: authToken,
-      expected: [200, 201, 400],
+    await step('POST /api/wallet/create-usd/{userId}', async () => {
+      await request('POST', `/api/wallet/create-usd/${userId}`, {
+        token: authToken,
+        expected: [200, 201, 400],
+      });
     });
-  });
+  } else {
+    skip('POST /api/wallet/create/{userId}', 'MAPLERAD_LIVE_TESTS_ENABLED is not true');
+    skip('POST /api/wallet/create-usd/{userId}', 'MAPLERAD_LIVE_TESTS_ENABLED is not true');
+  }
 
   await step('GET /api/wallet/balance/{userId}', async () => {
     const res = await request<any>('GET', `/api/wallet/balance/${userId}`, {
@@ -322,40 +479,7 @@ async function main() {
     }
   });
 
-  if (webhookSecret) {
-    const payload = JSON.stringify({
-      id: `smoke_evt_${runId}`,
-      event: 'smoke.test',
-      data: {
-        reference: `smoke_ref_${runId}`,
-        status: 'sandbox',
-      },
-    });
-    const signature = crypto.createHmac('sha512', webhookSecret).update(payload).digest('hex');
-
-    await step('POST /api/wallet/webhook signed mock event', async () => {
-      const res = await request('POST', '/api/wallet/webhook', {
-        body: payload,
-        headers: { [webhookHeader]: signature },
-        expected: [200],
-      });
-      if (res.data?.ok !== true) throw new Error(`Unexpected webhook response: ${safeString(res.data)}`);
-    });
-
-    await step('POST /api/wallet/webhook duplicate signed mock event', async () => {
-      const res = await request('POST', '/api/wallet/webhook', {
-        body: payload,
-        headers: { [webhookHeader]: signature },
-        expected: [200],
-      });
-      if (res.data?.ok !== true || res.data?.duplicate !== true) {
-        throw new Error(`Expected duplicate webhook response: ${safeString(res.data)}`);
-      }
-    });
-  } else {
-    skip('POST /api/wallet/webhook signed mock event', 'MAPLERAD_WEBHOOK_SECRET/SMOKE_MAPLERAD_WEBHOOK_SECRET not provided');
-    skip('POST /api/wallet/webhook duplicate signed mock event', 'MAPLERAD_WEBHOOK_SECRET/SMOKE_MAPLERAD_WEBHOOK_SECRET not provided');
-  }
+  await runWebhookChecks();
 
   await step('Admin endpoints reject normal user token', async () => {
     const checks: Array<[HttpMethod, string]> = [

@@ -5,9 +5,10 @@
   "scripts": {
     "build": "tsc",
     "docs:sync": "node scripts/sync-openapi.js",
-    "test": "npm run build && node --test dist/tests",
+    "test": "npm run build && node --test \"dist/tests/*.js\"",
     "dev": "tsc && nodemon dist/index.js",
     "start": "node dist/index.js",
+    "maplerad:readiness": "ts-node scripts/maplerad-live-readiness.ts",
     "smoke:staging": "ts-node scripts/staging-smoke-test.ts",
     "clean": "tsc --build --clean",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",

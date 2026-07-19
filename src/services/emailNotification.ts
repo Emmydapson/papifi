@@ -14,6 +14,24 @@ const RESEND_API_URL = 'https://api.resend.com/emails';
 const DEFAULT_HTTP_TIMEOUT_MS = 10_000;
 let smtpTransporter: Transporter | undefined;
 
+export type EmailProviderErrorCode =
+  | 'TEST_DATA_INVALID'
+  | 'EMAIL_PROVIDER_AUTH_FAILED'
+  | 'EMAIL_SENDER_NOT_VERIFIED'
+  | 'EMAIL_PROVIDER_UNAVAILABLE'
+  | 'EMAIL_PROVIDER_FAILED';
+
+export class EmailProviderError extends Error {
+  constructor(
+    public readonly code: EmailProviderErrorCode,
+    message: string,
+    public readonly status?: number
+  ) {
+    super(message);
+    this.name = 'EmailProviderError';
+  }
+}
+
 const getEmailProvider = (): EmailProvider => {
   const provider = process.env.EMAIL_PROVIDER?.toLowerCase();
   if (provider === 'resend' || provider === 'smtp') return provider;
@@ -74,6 +92,38 @@ const sendWithResend = async (message: EmailMessage) => {
   );
 };
 
+const classifyEmailProviderError = (error: unknown): EmailProviderError => {
+  if (!axios.isAxiosError(error)) {
+    return new EmailProviderError('EMAIL_PROVIDER_FAILED', 'Email provider request failed');
+  }
+
+  const status = error.response?.status;
+  const code = error.code;
+  const body: any = error.response?.data || {};
+  const providerMessage = String(body.message || body.error || error.message || '').toLowerCase();
+  const providerName = String(body.name || '').toLowerCase();
+
+  if (status === 422 && (providerName.includes('validation') || providerMessage.includes('invalid `to`') || providerMessage.includes('invalid to'))) {
+    return new EmailProviderError('TEST_DATA_INVALID', 'Email recipient test data is invalid or reserved', status);
+  }
+  if (status === 401 || status === 403 || providerMessage.includes('api key') || providerMessage.includes('unauthorized')) {
+    return new EmailProviderError('EMAIL_PROVIDER_AUTH_FAILED', 'Email provider authentication failed', status);
+  }
+  if (
+    providerMessage.includes('domain is not verified') ||
+    providerMessage.includes('verify a domain') ||
+    providerMessage.includes('sender') ||
+    providerMessage.includes('from')
+  ) {
+    return new EmailProviderError('EMAIL_SENDER_NOT_VERIFIED', 'Email sender domain is not verified', status);
+  }
+  if (!status || code === 'ECONNABORTED' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' || code === 'ECONNRESET') {
+    return new EmailProviderError('EMAIL_PROVIDER_UNAVAILABLE', 'Email provider is unavailable', status);
+  }
+
+  return new EmailProviderError('EMAIL_PROVIDER_FAILED', 'Email provider request failed', status);
+};
+
 const sendEmail = async (message: EmailMessage, eventName: string) => {
   let provider: EmailProvider | 'unconfigured' = 'unconfigured';
 
@@ -89,14 +139,15 @@ const sendEmail = async (message: EmailMessage, eventName: string) => {
     }
     logger.info(`${eventName}_sent`, { provider });
   } catch (error) {
-    const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+    const classified = classifyEmailProviderError(error);
     const code = axios.isAxiosError(error) ? error.code : undefined;
-    logger.error(`${eventName}_failed`, new Error('Email provider request failed'), {
+    logger.error(`${eventName}_failed`, classified, {
       provider,
-      status,
+      status: classified.status,
+      classification: classified.code,
       code,
     });
-    throw new Error('Could not send email');
+    throw classified;
   }
 };
 
