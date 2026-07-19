@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { AppDataSource } from '../database';
 import { KycType, KycVerification } from '../entities/KycVerification';
 import { User } from '../entities/User';
-import { MapleRadService } from '../services/mapleradService';
+import { isMapleradProviderError, mapleradErrorToHttpStatus, MapleRadService } from '../services/mapleradService';
 import { auditService } from '../services/auditService';
+import { logger } from '../services/logger';
 
 const mapleRadService = new MapleRadService();
 const kycRepo = AppDataSource.getRepository(KycVerification);
@@ -56,7 +57,21 @@ class KYCController {
 
     try {
       const providerResponse = await mapleRadService.verifyBvn(String(bvn));
-      const passed = Boolean(providerResponse?.id || providerResponse?.bvn || providerResponse?.status === 'success');
+      const providerStatus = String(providerResponse?.status || providerResponse?.verification_status || '').toLowerCase();
+      const passed = Boolean(
+        providerResponse?.id ||
+        providerResponse?.bvn ||
+        ['success', 'successful', 'verified', 'valid'].includes(providerStatus)
+      );
+
+      if (!passed) {
+        logger.warn('maplerad_bvn_verification_not_confirmed', {
+          operation: 'maplerad.identity.verify_bvn',
+          userId,
+          providerStatus: providerResponse?.status || providerResponse?.verification_status,
+          providerMessage: providerResponse?.message,
+        });
+      }
 
       const verification = kycRepo.create({
         user: { id: userId } as User,
@@ -89,9 +104,19 @@ class KYCController {
         status: verification.status,
       });
     } catch (error: any) {
+      if (isMapleradProviderError(error)) {
+        return res.status(mapleradErrorToHttpStatus(error)).json({
+          message: 'Unable to verify BVN with Maplerad.',
+          code: error.code,
+          providerStatus: error.providerStatus,
+          providerMessage: error.providerMessage || 'Maplerad rejected the BVN verification request.',
+          requestId: error.requestId,
+        });
+      }
+
       return res.status(502).json({
         message: 'Unable to verify BVN with Maplerad.',
-        error: error?.message || 'provider_error',
+        error: 'provider_error',
       });
     }
   }

@@ -1,11 +1,13 @@
 // src/services/mapleradService.ts
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import crypto from 'crypto';
+import { EntityManager } from 'typeorm';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
+import { AuditLog } from '../entities/AuditLog';
 import { logger } from './logger';
 
 type MapleradEnvelope<T> = {
@@ -22,6 +24,7 @@ type MapleradCustomer = {
   email?: string;
   country?: string;
   tier?: string;
+  phone?: unknown;
 };
 
 type MapleradVirtualAccount = {
@@ -35,6 +38,41 @@ type MapleradVirtualAccount = {
   status?: string;
   reference?: string;
   customer_id?: string;
+};
+
+type MapleradRequestOptions = {
+  operation: string;
+  method: 'GET' | 'POST' | 'PATCH';
+  path: string;
+  payload?: unknown;
+  params?: Record<string, unknown>;
+};
+
+export class MapleradProviderError extends Error {
+  constructor(
+    message: string,
+    public readonly operation: string,
+    public readonly providerStatus?: number,
+    public readonly providerMessage?: string,
+    public readonly requestId?: string,
+    public readonly safeResponseBody?: unknown,
+    public readonly code: 'VALIDATION' | 'AUTH' | 'NOT_FOUND' | 'TIMEOUT' | 'NETWORK' | 'PROVIDER' | 'SCHEMA' = 'PROVIDER'
+  ) {
+    super(message);
+    this.name = 'MapleradProviderError';
+  }
+}
+
+export const isMapleradProviderError = (error: unknown): error is MapleradProviderError =>
+  error instanceof MapleradProviderError;
+
+export const mapleradErrorToHttpStatus = (error: unknown) => {
+  if (!isMapleradProviderError(error)) return 502;
+  if (error.code === 'VALIDATION') return error.providerStatus === 422 ? 422 : 400;
+  if (error.code === 'AUTH') return 502;
+  if (error.code === 'NOT_FOUND') return 400;
+  if (error.code === 'SCHEMA') return 502;
+  return 502;
 };
 
 type MapleradTransfer = {
@@ -199,13 +237,95 @@ export class MapleRadService {
   }
 
   private providerErrorDetails(error: any) {
+    if (isMapleradProviderError(error)) {
+      return `${error.operation} returned ${error.providerStatus || error.code}${error.providerMessage ? `: ${error.providerMessage}` : ''}`;
+    }
     const status = error?.response?.status;
     const endpoint = this.endpointPath(error?.config?.url);
     const providerMessage = error?.response?.data?.message || error?.response?.data?.error;
-    if (status) {
-      return `${endpoint} returned ${status}${providerMessage ? `: ${String(providerMessage).slice(0, 160)}` : ''}`;
-    }
+    if (status) return `${endpoint} returned ${status}${providerMessage ? `: ${String(providerMessage).slice(0, 160)}` : ''}`;
     return error?.message || 'provider_error';
+  }
+
+  private providerRequestId(headers: any) {
+    return headers?.['x-request-id'] || headers?.['x-amzn-requestid'] || headers?.['request-id'];
+  }
+
+  private providerMessage(body: any) {
+    const value = body?.message || body?.error || body?.errors?.[0]?.message || body?.detail;
+    return value ? String(value).slice(0, 240) : undefined;
+  }
+
+  private providerErrorCode(status?: number, message?: string, axiosCode?: string): MapleradProviderError['code'] {
+    const lower = String(message || '').toLowerCase();
+    if (axiosCode === 'ECONNABORTED') return 'TIMEOUT';
+    if (!status) return 'NETWORK';
+    if (status === 401 || status === 403) return 'AUTH';
+    if (status === 404) return 'NOT_FOUND';
+    if (status === 400 || status === 422) return 'VALIDATION';
+    if (lower.includes('validation')) return 'VALIDATION';
+    return 'PROVIDER';
+  }
+
+  private async requestMaplerad<T>(options: MapleradRequestOptions): Promise<T> {
+    try {
+      const res = await this.http.request<MapleradEnvelope<T> | T>({
+        method: options.method,
+        url: options.path,
+        data: options.payload,
+        params: options.params,
+        headers: this.getSecretHeaders(),
+      });
+
+      logger.info('maplerad_provider_request_succeeded', {
+        operation: options.operation,
+        endpoint: options.path,
+        status: res.status,
+        requestId: this.providerRequestId(res.headers),
+      });
+      return this.unwrap<T>(res);
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const safeBody = this.sanitizeProviderPayload(error?.response?.data);
+      const providerMessage = this.providerMessage(error?.response?.data);
+      const requestId = this.providerRequestId(error?.response?.headers);
+      const code = this.providerErrorCode(status, providerMessage, error?.code);
+
+      logger.error('maplerad_provider_request_failed', new Error('Maplerad provider request failed'), {
+        operation: options.operation,
+        endpoint: options.path,
+        providerStatus: status,
+        providerMessage,
+        requestId,
+        code,
+      });
+
+      throw new MapleradProviderError(
+        `${options.operation} failed${status ? ` with Maplerad status ${status}` : ''}${providerMessage ? `: ${providerMessage}` : ''}`,
+        options.operation,
+        status,
+        providerMessage,
+        requestId,
+        safeBody,
+        code
+      );
+    }
+  }
+
+  private normalize(value?: string | null) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  private normalizeName(value?: string | null) {
+    return this.normalize(value).replace(/\s+/g, ' ');
+  }
+
+  private validateCustomerMatch(user: User, customer: MapleradCustomer) {
+    const mismatches: string[] = [];
+    if (customer.email && this.normalize(customer.email) !== this.normalize(user.email)) mismatches.push('email');
+    if (customer.first_name && this.normalizeName(customer.first_name) !== this.normalizeName(user.firstName)) mismatches.push('first_name');
+    if (customer.last_name && this.normalizeName(customer.last_name) !== this.normalizeName(user.lastName)) mismatches.push('last_name');
+    return { ok: mismatches.length === 0, mismatches };
   }
 
   private getSecretHeaders() {
@@ -229,11 +349,53 @@ export class MapleRadService {
   /** -------------------------------
    * CUSTOMER MANAGEMENT
    * ------------------------------- */
+  async getCustomerById(customerId: string): Promise<MapleradCustomer> {
+    const customer = await this.requestMaplerad<MapleradCustomer>({
+      operation: 'maplerad.customer.retrieve',
+      method: 'GET',
+      path: `/customers/${customerId}`,
+    });
+    if (!customer?.id) {
+      throw new MapleradProviderError(
+        'Maplerad customer retrieve returned malformed response',
+        'maplerad.customer.retrieve',
+        undefined,
+        'missing customer id',
+        undefined,
+        this.sanitizeProviderPayload(customer),
+        'SCHEMA'
+      );
+    }
+    return customer;
+  }
+
   async ensureMapleRadCustomer(userId: string): Promise<string> {
-    const user = await this.userRepo.findOne({ where: { id: userId } });
+    return AppDataSource.transaction(async (manager) => this.ensureMapleRadCustomerForUser(userId, manager));
+  }
+
+  private async ensureMapleRadCustomerForUser(userId: string, manager: EntityManager): Promise<string> {
+    const user = await manager.getRepository(User).findOne({
+      where: { id: userId },
+      lock: { mode: 'pessimistic_write' },
+    });
     if (!user) throw new Error('User not found');
 
-    if (user.mapleradCustomerId) return user.mapleradCustomerId;
+    if (user.mapleradCustomerId) {
+      const customer = await this.getCustomerById(user.mapleradCustomerId);
+      const match = this.validateCustomerMatch(user, customer);
+      if (!match.ok) {
+        throw new MapleradProviderError(
+          `Persisted Maplerad customer does not match Papafi user: ${match.mismatches.join(', ')}`,
+          'maplerad.customer.validate_persisted',
+          400,
+          'persisted customer mismatch',
+          undefined,
+          { mismatches: match.mismatches },
+          'VALIDATION'
+        );
+      }
+      return user.mapleradCustomerId;
+    }
 
     const payload = {
       first_name: user.firstName,
@@ -242,92 +404,262 @@ export class MapleRadService {
       country: 'NG',
     };
 
-    // queue the request
-    const res: AxiosResponse<MapleradEnvelope<MapleradCustomer>> = await this.http.post(
-    '/customers',
-    payload,
-    { headers: this.getSecretHeaders() }
-  );
+    try {
+      const customer = await this.requestMaplerad<MapleradCustomer>({
+        operation: 'maplerad.customer.create',
+        method: 'POST',
+        path: '/customers',
+        payload,
+      });
 
+      const customerId = customer?.id;
+      if (!customerId) {
+        throw new MapleradProviderError(
+          'Maplerad customer creation returned malformed response',
+          'maplerad.customer.create',
+          undefined,
+          'missing customer id',
+          undefined,
+          this.sanitizeProviderPayload(customer),
+          'SCHEMA'
+        );
+      }
 
-    const customerId = this.unwrap<MapleradCustomer>(res)?.id;
-    if (!customerId) throw new Error('Failed to create MapleRad customer');
+      user.mapleradCustomerId = customerId;
+      await manager.getRepository(User).save(user);
+      return customerId;
+    } catch (error) {
+      if (
+        isMapleradProviderError(error) &&
+        error.code === 'VALIDATION' &&
+        String(error.providerMessage || '').toLowerCase().includes('already enrolled')
+      ) {
+        throw new MapleradProviderError(
+          'Maplerad customer already exists and must be linked with the admin reconciliation command before wallet creation can continue',
+          'maplerad.customer.create',
+          error.providerStatus,
+          error.providerMessage,
+          error.requestId,
+          error.safeResponseBody,
+          'VALIDATION'
+        );
+      }
+      throw error;
+    }
+  }
 
-    user.mapleradCustomerId = customerId;
-    await this.userRepo.save(user);
+  async reconcileExistingCustomer(userId: string, customerId: string, confirmed: boolean) {
+    const providerCustomer = await this.getCustomerById(customerId);
 
-    return customerId;
+    return AppDataSource.transaction(async (manager) => {
+      const user = await manager.getRepository(User).findOne({
+        where: { id: userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) throw new Error('Papafi user not found');
+      if (user.mapleradCustomerId && user.mapleradCustomerId !== customerId) {
+        throw new Error('Papafi user is already linked to a different Maplerad customer');
+      }
+
+      const existingUser = await manager.getRepository(User).findOne({ where: { mapleradCustomerId: customerId } });
+      if (existingUser && existingUser.id !== user.id) {
+        throw new Error('Maplerad customer ID is already linked to another Papafi user');
+      }
+
+      const match = this.validateCustomerMatch(user, providerCustomer);
+      if (!match.ok) {
+        return {
+          matched: false,
+          written: false,
+          mismatches: match.mismatches,
+          user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
+          providerCustomer: {
+            id: providerCustomer.id,
+            email: providerCustomer.email,
+            firstName: providerCustomer.first_name,
+            lastName: providerCustomer.last_name,
+          },
+        };
+      }
+
+      if (!confirmed) {
+        return {
+          matched: true,
+          written: false,
+          user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName },
+          providerCustomer: {
+            id: providerCustomer.id,
+            email: providerCustomer.email,
+            firstName: providerCustomer.first_name,
+            lastName: providerCustomer.last_name,
+          },
+        };
+      }
+
+      user.mapleradCustomerId = customerId;
+      await manager.getRepository(User).save(user);
+      await manager.getRepository(AuditLog).save(
+        manager.getRepository(AuditLog).create({
+          actorUserId: user.id,
+          targetUserId: user.id,
+          action: 'MAPLERAD_CUSTOMER_RECONCILED',
+          entityType: 'User',
+          entityId: user.id,
+          metadata: { mapleradCustomerId: customerId },
+        })
+      );
+
+      return { matched: true, written: true, user: { id: user.id }, providerCustomer: { id: providerCustomer.id } };
+    });
   }
 
   async upgradeCustomerTier1(payload: unknown): Promise<any> {
-    const res: AxiosResponse = await this.http.patch('/customers/upgrade/tier1', payload, { headers: this.getSecretHeaders() })
-    
-    return this.unwrap(res);
+    return this.requestMaplerad({
+      operation: 'maplerad.customer.upgrade_tier1',
+      method: 'PATCH',
+      path: '/customers/upgrade/tier1',
+      payload,
+    });
   }
 
   async verifyBvn(bvn: string): Promise<any> {
-    const res: AxiosResponse = await this.http.post('/identity/bvn', { bvn }, { headers: this.getSecretHeaders() })
+    const normalizedBvn = String(bvn).trim();
+    if (!/^\d{11}$/.test(normalizedBvn)) {
+      throw new MapleradProviderError(
+        'BVN must be an 11-digit string',
+        'maplerad.identity.verify_bvn',
+        400,
+        'invalid bvn format',
+        undefined,
+        undefined,
+        'VALIDATION'
+      );
+    }
 
-    return this.unwrap(res);
+    const data = await this.requestMaplerad<any>({
+      operation: 'maplerad.identity.verify_bvn',
+      method: 'POST',
+      path: '/identity/bvn',
+      payload: { bvn: normalizedBvn },
+    });
+
+    if (!data || typeof data !== 'object') {
+      throw new MapleradProviderError(
+        'Maplerad BVN verification returned malformed response',
+        'maplerad.identity.verify_bvn',
+        undefined,
+        'malformed response',
+        undefined,
+        this.sanitizeProviderPayload(data),
+        'SCHEMA'
+      );
+    }
+
+    return data;
   }
 
   async listCustomers(page = 1, pageSize = 1): Promise<MapleradCustomer[]> {
-    const res: AxiosResponse = await this.http.get('/customers', {
+    const data: any = await this.requestMaplerad({
+      operation: 'maplerad.customer.list',
+      method: 'GET',
+      path: '/customers',
       params: { page, page_size: pageSize },
-      headers: this.getSecretHeaders(),
     });
-    const data: any = this.unwrap(res);
     if (Array.isArray(data)) return data;
     if (Array.isArray(data?.customers)) return data.customers;
     if (Array.isArray(data?.items)) return data.items;
     return [];
   }
 
+  async getCustomerVirtualAccounts(customerId: string): Promise<MapleradVirtualAccount[]> {
+    const data: any = await this.requestMaplerad({
+      operation: 'maplerad.virtual_account.list_for_customer',
+      method: 'GET',
+      path: `/customers/${customerId}/virtual-account`,
+    });
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.accounts)) return data.accounts;
+    if (Array.isArray(data?.items)) return data.items;
+    if (Array.isArray(data?.virtual_accounts)) return data.virtual_accounts;
+    return [];
+  }
+
+  private findProviderVirtualAccount(accounts: MapleradVirtualAccount[], currency: Currency) {
+    return accounts.find((account) => {
+      const accountCurrency = String(account.currency || '').toUpperCase();
+      return accountCurrency === currency && Boolean(account.account_number);
+    });
+  }
+
+  private applyVirtualAccountToWallet(wallet: Wallet, data: MapleradVirtualAccount, currency: Currency) {
+    wallet.mapleradAccountId = data.id || data.account_id;
+    wallet.accountNumber = data.account_number;
+    wallet.bankName = data.bank_name || data.bank?.name;
+    wallet.currency = currency;
+    return wallet;
+  }
+
   /** -------------------------------
    * WALLET / DEPOSIT / WITHDRAWAL
    * ------------------------------- */
   async createVirtualAccountForUser(userId: string, currency: Currency = 'NGN'): Promise<any> {
-  const user = await this.userRepo.findOne({ where: { id: userId }, relations: ['wallets'] });
-  if (!user) throw new Error(`MapleRad Error: User ${userId} not found`);
+    if (currency !== 'NGN') {
+      throw new MapleradProviderError(
+        'Maplerad static virtual account creation currently supports NGN only',
+        'maplerad.virtual_account.create',
+        400,
+        'unsupported currency',
+        undefined,
+        { currency },
+        'VALIDATION'
+      );
+    }
 
-  let customerId: string;
-  try {
-    customerId = await this.ensureMapleRadCustomer(user.id);
-  } catch (err: any) {
-    throw new Error(`MapleRad Error: Failed to ensure customer for user ${user.id} - ${this.providerErrorDetails(err)}`);
+    return AppDataSource.transaction(async (manager) => {
+      const user = await manager.getRepository(User).findOne({
+        where: { id: userId },
+        relations: ['wallets'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user) throw new Error(`MapleRad Error: User ${userId} not found`);
+
+      const walletRepo = manager.getRepository(Wallet);
+      const existingWallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
+      if (existingWallet?.accountNumber && existingWallet?.mapleradAccountId) return existingWallet;
+
+      const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
+      const providerAccounts = await this.getCustomerVirtualAccounts(customerId);
+      let data = this.findProviderVirtualAccount(providerAccounts, currency);
+
+      if (!data) {
+        const payload = { customer_id: customerId, currency, preferred_bank: process.env.MAPLERAD_NGN_PREFERRED_BANK };
+        if (!payload.preferred_bank) delete (payload as Partial<typeof payload>).preferred_bank;
+        data = await this.requestMaplerad<MapleradVirtualAccount>({
+          operation: 'maplerad.virtual_account.create',
+          method: 'POST',
+          path: '/collections/virtual-account',
+          payload,
+        });
+      }
+
+      if (!data?.account_number) {
+        throw new MapleradProviderError(
+          'Maplerad virtual account response did not include an account number',
+          'maplerad.virtual_account.create',
+          undefined,
+          'missing account_number',
+          undefined,
+          this.sanitizeProviderPayload(data),
+          'SCHEMA'
+        );
+      }
+
+      const wallet = this.applyVirtualAccountToWallet(existingWallet || walletRepo.create({ user }), data, currency);
+      await walletRepo.save(wallet);
+
+      return data;
+    });
   }
-
-  const payload = { customer_id: customerId, currency, preferred_bank: process.env.MAPLERAD_NGN_PREFERRED_BANK };
-  if (!payload.preferred_bank) delete (payload as Partial<typeof payload>).preferred_bank;
-  let data: MapleradVirtualAccount;
-  try {
-    const res: AxiosResponse = await this.http.post('/collections/virtual-account', payload, { headers: this.getSecretHeaders() })
-    
-    data = this.unwrap<MapleradVirtualAccount>(res);
-  } catch (err: any) {
-    throw new Error(`MapleRad Error: Failed to call virtual account endpoint - ${this.providerErrorDetails(err)}`);
-  }
-
-  const accountNumber = data?.account_number;
-  if (!accountNumber) {
-    throw new Error(`MapleRad Error: Virtual account creation returned null for user ${user.id}`);
-  }
-
-  const wallet = new Wallet();
-  wallet.user = user;
-  wallet.mapleradAccountId = data.id || data.account_id;
-  wallet.accountNumber = accountNumber;
-  wallet.bankName = data.bank_name || data.bank?.name;
-  wallet.currency = currency;
-
-  try {
-    await this.walletRepo.save(wallet);
-  } catch (err: any) {
-    throw new Error(`Database Error: Failed to save wallet for user ${user.id} - ${err.message}`);
-  }
-
-  return data;
-}
 
 async createUsdVirtualAccount(userId: string): Promise<any> {
   const user = await this.userRepo.findOne({ where: { id: userId } });

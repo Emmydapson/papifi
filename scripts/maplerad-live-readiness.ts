@@ -17,6 +17,7 @@ const liveTestsEnabled = process.env.MAPLERAD_LIVE_TESTS_ENABLED === 'true';
 const testEmail = process.env.MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL;
 const testPhone = process.env.MAPLERAD_LIVE_TEST_PHONE;
 const testBvn = process.env.MAPLERAD_LIVE_TEST_BVN;
+const outputFile = process.env.MAPLERAD_READINESS_OUTPUT_FILE;
 const baseUrl = normalizeBaseUrl(process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1');
 
 const http = axios.create({
@@ -142,6 +143,9 @@ async function main() {
   console.log(`Base URL: ${baseUrl}`);
   console.log(`Secret key configured: ${secretKey ? 'yes' : 'no'}`);
   console.log(`Live customer creation enabled: ${liveTestsEnabled ? 'yes' : 'no'}`);
+  if (liveTestsEnabled) {
+    console.log('Warning: direct readiness customers are not linked to Papafi users. Use maplerad:reconcile-customer before Papafi wallet creation.');
+  }
 
   await step('Configuration', async () => {
     if (!secretKey) throw new Error('Missing MAPLERAD_SECRET_KEY or MAPLERAD_SECRET');
@@ -170,7 +174,26 @@ async function main() {
         });
         const data: any = response.data?.data || response.data;
         if (!data?.id) throw new Error('Schema mismatch: customer response did not include an id');
-        return 'created/readiness customer id returned';
+        const instruction = `npm run maplerad:reconcile-customer -- --user-id <papafi-user-id> --maplerad-customer-id ${data.id} --confirm`;
+        if (outputFile) {
+          const fs = await import('fs');
+          fs.writeFileSync(
+            outputFile,
+            JSON.stringify(
+              {
+                mapleradCustomerId: data.id,
+                email: '[redacted]',
+                reconciliationInstruction: instruction,
+                warning: 'This readiness customer is not linked to any Papafi user until reconciled explicitly.',
+              },
+              null,
+              2
+            )
+          );
+        }
+        console.log(`  Maplerad customer id: ${data.id}`);
+        console.log(`  Reconcile with: ${instruction}`);
+        return 'created readiness customer; explicit reconciliation required before Papafi wallet creation';
       });
     }
   } else {
