@@ -25,15 +25,24 @@ This smoke test exercises deployed Papafi API endpoints from a frontend/mobile i
 | `SMOKE_TEST_PIN` | Overrides the test transaction PIN. Do not use a real user PIN. |
 | `MAPLERAD_LIVE_TESTS_ENABLED` | Must be `true` before the smoke test calls live provider-affecting KYC or virtual-account routes. Defaults to skipped. |
 | `MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL`, `MAPLERAD_LIVE_TEST_PHONE`, `MAPLERAD_LIVE_TEST_BVN` | Enables BVN KYC check with explicit authorized test identity data. |
-| `MAPLERAD_WEBHOOK_SECRET` or `SMOKE_MAPLERAD_WEBHOOK_SECRET` | Enables signed mock Maplerad webhook and duplicate webhook checks. |
+| `MAPLERAD_ENVIRONMENT` | Use `sandbox` for staging smoke tests unless this is a separately approved live-production verification. |
+| `MAPLERAD_SANDBOX_TESTS_ENABLED` | Enables sandbox-only provider checks in readiness scripts. |
+| `MAPLERAD_SANDBOX_TEST_BVN`, `MAPLERAD_SANDBOX_TEST_PHONE`, `MAPLERAD_SANDBOX_TEST_EMAIL` | Official Maplerad sandbox identity values only, when Maplerad documents/supports them. |
+| `MAPLERAD_WEBHOOK_VERIFICATION_MODE` | Backend mode: `signature`, `ip_and_requery`, or `disabled`. Production should use `signature` once Maplerad provides a `whsec_...` signing secret. |
+| `MAPLERAD_SANDBOX_WEBHOOK_SECRET`, `MAPLERAD_PRODUCTION_WEBHOOK_SECRET` | Endpoint-specific Maplerad signing secrets beginning with `whsec_`. These are not API secret/public keys. Leave blank until Maplerad provides the real value. |
+| `SMOKE_MAPLERAD_WEBHOOK_SECRET` | Optional local-only mock signing secret for smoke-test generated callbacks. Do not use a Maplerad API secret/public key. |
 
-Do not use fake recipient domains such as `example.com` or `test.com`. Resend rejects those recipients. Use an operator-controlled inbox only, and use plus-addressing only when that inbox/domain is known to support it.
+Do not use fake recipient domains such as `example.com` or `test.com`. Resend rejects those recipients. Use an operator-controlled inbox only, and use plus-addressing only when that inbox/domain is known to support it. Do not call production BVN or create production Maplerad customers from smoke tests.
 
 The deployed email sender must use the verified domain:
 
 ```text
 SMTP_FROM_EMAIL=noreply@mail.papifi.com
 ```
+
+Maplerad API keys are not webhook signing secrets. The dashboard may show API secret/public keys without showing the Svix endpoint secret. Do not copy API keys into `MAPLERAD_SANDBOX_WEBHOOK_SECRET` or `MAPLERAD_PRODUCTION_WEBHOOK_SECRET`. If no `whsec_...` value is visible, contact Maplerad support or recreate/configure the webhook endpoint.
+
+`ip_and_requery` is a temporary fallback only. It uses Maplerad's documented webhook source IPs, safe proxy configuration such as `MAPLERAD_TRUST_PROXY=loopback`, and backend re-query confirmation before any value is applied.
 
 ## How To Run
 
@@ -45,7 +54,7 @@ $env:SMOKE_TEST_EMAIL = "operator-controlled-inbox@your-verified-domain.tld"
 $env:SMOKE_TEST_PHONE = "+2348012340000"
 $env:ENABLE_TEST_OTP_BYPASS = "true"
 $env:TEST_OTP_CODE = "<safe-dev-otp-code>"
-$env:MAPLERAD_WEBHOOK_SECRET = "<staging-webhook-secret>"
+$env:SMOKE_MAPLERAD_WEBHOOK_SECRET = "whsec_<local-smoke-only-secret>"
 npm run smoke:staging
 ```
 
@@ -160,6 +169,8 @@ Admin endpoints are expected to return `401` or `403` for a normal user token.
 ## Maplerad Sandbox Notes
 
 BVN KYC is tested only when `MAPLERAD_LIVE_TESTS_ENABLED=true` and all authorized live test identity variables are supplied. Use only explicit test identity values approved for staging/live verification.
+
+For sandbox testing, prefer `MAPLERAD_ENVIRONMENT=sandbox` with `MAPLERAD_SANDBOX_TEST_BVN` only if Maplerad provides an official sandbox BVN. If sandbox BVN is unsupported, keep the live BVN path skipped and rely on mocked provider tests.
 
 The webhook test does not use a provider-private payload and does not simulate a deposit. It sends a signed non-money mock event (`smoke.test`) to confirm:
 

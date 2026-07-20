@@ -1,3 +1,5 @@
+import { resolveMapleradConfig } from './maplerad';
+
 const productionRequiredEnv = [
   'DB_HOST',
   'DB_PORT',
@@ -8,30 +10,11 @@ const productionRequiredEnv = [
   'SESSION_SECRET',
   'EMAIL_PROVIDER',
   'SMTP_FROM_EMAIL',
-  'MAPLERAD_SECRET_KEY',
-  'MAPLERAD_PUBLIC_KEY',
-  'MAPLERAD_WEBHOOK_SECRET',
   'CORS_ALLOWED_ORIGINS',
 ];
 
-const placeholderValues = new Set(['replace-me', 'replace-with-long-random-secret']);
-
 export const validateEnv = () => {
-  const hasUsableEnv = (...names: string[]) =>
-    names.some((name) => {
-      const value = process.env[name];
-      return value && !placeholderValues.has(value);
-    });
-
-  const missingMaplerad = [
-    !hasUsableEnv('MAPLERAD_SECRET_KEY', 'MAPLERAD_SECRET') && 'MAPLERAD_SECRET_KEY or MAPLERAD_SECRET',
-    !hasUsableEnv('MAPLERAD_PUBLIC_KEY', 'MAPLERAD_PUBLIC') && 'MAPLERAD_PUBLIC_KEY or MAPLERAD_PUBLIC',
-    !hasUsableEnv('MAPLERAD_WEBHOOK_SECRET') && 'MAPLERAD_WEBHOOK_SECRET',
-  ].filter(Boolean);
-
-  if (missingMaplerad.length > 0) {
-    throw new Error(`Missing required Maplerad env vars: ${missingMaplerad.join(', ')}`);
-  }
+  resolveMapleradConfig();
 
   if (process.env.NODE_ENV !== 'production') return;
 

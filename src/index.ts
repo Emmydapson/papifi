@@ -18,14 +18,23 @@ import { validateEnv } from './config/env';
 import { logger } from './services/logger';
 import { startReconciliationWorker } from './workers/reconciliationWorker';
 import { registerApiDocs } from './apiDocs';
+import { mapleradStartupSummary } from './config/maplerad';
 
 
 
 dotenv.config();
 validateEnv();
+logger.info('provider_configured', mapleradStartupSummary());
 
 const app = express();
 const PORT = Number(process.env.PORT) || 5000;
+
+const trustProxy = process.env.MAPLERAD_TRUST_PROXY;
+if (trustProxy === 'loopback') {
+  app.set('trust proxy', 'loopback');
+} else if (/^\d+$/.test(trustProxy || '')) {
+  app.set('trust proxy', Number(trustProxy));
+}
 
 // PostgreSQL connection pool setup
 const Pool = pg.Pool;

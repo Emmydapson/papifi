@@ -8,9 +8,10 @@ import {
 } from '../services/mapleradService';
 
 function serviceWithMockedRequest(mock: (options: any) => Promise<any>) {
-  process.env.MAPLERAD_SECRET_KEY = 'sk_test_docs_only';
-  process.env.MAPLERAD_PUBLIC_KEY = 'pk_test_docs_only';
-  process.env.MAPLERAD_WEBHOOK_SECRET = 'whsec_cGFwYWZpLXRlc3Q=';
+  process.env.MAPLERAD_ENVIRONMENT = 'sandbox';
+  process.env.MAPLERAD_SANDBOX_SECRET_KEY = 'sk_test_docs_only';
+  process.env.MAPLERAD_SANDBOX_PUBLIC_KEY = 'pk_test_docs_only';
+  process.env.MAPLERAD_SANDBOX_WEBHOOK_SECRET = 'whsec_cGFwYWZpLXRlc3Q=';
   process.env.MAPLERAD_BASE_URL = 'https://api.maplerad.com/v1';
   const service = new MapleRadService();
   (service as any).requestMaplerad = mock;

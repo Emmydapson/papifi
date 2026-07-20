@@ -32,9 +32,10 @@ Important production requirements:
 - `EMAIL_PROVIDER` (`resend` or `smtp`)
 - `RESEND_API_KEY` when `EMAIL_PROVIDER=resend`, or SMTP connection variables when `EMAIL_PROVIDER=smtp`
 - `SMTP_FROM_EMAIL` (the sender address for either provider)
-- `MAPLERAD_SECRET_KEY`
-- `MAPLERAD_PUBLIC_KEY`
-- `MAPLERAD_WEBHOOK_SECRET`
+- `MAPLERAD_ENVIRONMENT` (`sandbox` or `production`)
+- `MAPLERAD_SANDBOX_SECRET_KEY` for sandbox, or `MAPLERAD_PRODUCTION_SECRET_KEY` for production
+- `MAPLERAD_WEBHOOK_VERIFICATION_MODE` (`signature`, `ip_and_requery`, or `disabled`)
+- `MAPLERAD_SANDBOX_WEBHOOK_SECRET` for sandbox, or `MAPLERAD_PRODUCTION_WEBHOOK_SECRET` for production, only when Maplerad provides the endpoint signing secret
 - `CORS_ALLOWED_ORIGINS`
 
 Do not commit `.env`, private keys, PEM files, or provider credentials.
@@ -46,11 +47,61 @@ Resend is the recommended provider because it sends mail over HTTPS rather than 
 ```bash
 EMAIL_PROVIDER=resend
 RESEND_API_KEY=re_your_api_key
-SMTP_FROM_EMAIL=noreply@papifi.com
+SMTP_FROM_EMAIL=noreply@mail.papifi.com
 EMAIL_HTTP_TIMEOUT_MS=10000
 ```
 
 The sender address or domain must be verified in Resend. To use the legacy SMTP path explicitly, set `EMAIL_PROVIDER=smtp` and configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`. SMTP is not initialized or used when the provider is `resend`.
+
+## Maplerad Environments
+
+Papafi resolves Maplerad settings centrally with `MAPLERAD_ENVIRONMENT`.
+
+Sandbox and production use the same official Maplerad API host, normalized by the backend to:
+
+```text
+https://api.maplerad.com/v1
+```
+
+The environments are separated by keys and by Papafi provider-reference records:
+
+- `MAPLERAD_ENVIRONMENT=sandbox` uses `MAPLERAD_SANDBOX_BASE_URL`, `MAPLERAD_SANDBOX_SECRET_KEY`, and `MAPLERAD_SANDBOX_WEBHOOK_SECRET`.
+- `MAPLERAD_ENVIRONMENT=production` uses `MAPLERAD_PRODUCTION_BASE_URL`, `MAPLERAD_PRODUCTION_SECRET_KEY`, and `MAPLERAD_PRODUCTION_WEBHOOK_SECRET`.
+
+Development, test, and staging default to sandbox. Production defaults to production. A production Node process refuses `MAPLERAD_ENVIRONMENT=sandbox` unless `MAPLERAD_ALLOW_PRODUCTION_SANDBOX=true` is set for a temporary non-live deployment.
+
+Changing provider environments does not migrate provider customer IDs, wallet IDs, account numbers, KYC state, or webhook event IDs. Sandbox and production provider IDs are stored separately as `maplerad:sandbox` and `maplerad:production` references.
+
+### Maplerad Webhooks
+
+Maplerad webhook signing is separate from API authentication:
+
+- API secret keys authenticate Papafi's outgoing API requests to Maplerad.
+- API public keys are not webhook signing secrets.
+- Webhook signature verification requires the endpoint-specific signing secret from Maplerad, beginning with `whsec_`.
+- Do not generate a local `whsec_` for production; Maplerad would not sign with it.
+
+Use:
+
+```text
+MAPLERAD_WEBHOOK_VERIFICATION_MODE=signature
+MAPLERAD_SANDBOX_WEBHOOK_SECRET=whsec_...
+MAPLERAD_PRODUCTION_WEBHOOK_SECRET=whsec_...
+```
+
+If the dashboard does not show a `whsec_...` signing secret for the webhook endpoint, contact Maplerad support or recreate/configure the webhook endpoint until the signing secret is available. Keep the secret out of logs.
+
+Temporary fallback:
+
+```text
+MAPLERAD_WEBHOOK_VERIFICATION_MODE=ip_and_requery
+MAPLERAD_WEBHOOK_ALLOWED_IPS=54.216.8.72,54.173.54.49,52.215.16.239,52.55.123.25,52.6.93.106,63.33.109.123,44.228.126.217,50.112.21.217,52.24.126.164,54.148.139.208
+MAPLERAD_TRUST_PROXY=loopback
+```
+
+`ip_and_requery` is not equivalent to signature verification. It accepts only Maplerad's documented webhook source IPs and re-queries Maplerad before applying customer value. Use it only while waiting for the real `whsec_...` secret.
+
+`MAPLERAD_WEBHOOK_VERIFICATION_MODE=disabled` is allowed only for local development and automated tests. It is rejected in production and does not process real provider events.
 
 ## Security Notes
 

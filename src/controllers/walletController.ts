@@ -5,6 +5,7 @@ import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
 import { VirtualCard } from '../entities/virtualCard';
 import { Transaction } from '../entities/Transaction';
+import { ProviderReference } from '../entities/ProviderReference';
 import { isMapleradProviderError, mapleradErrorToHttpStatus, MapleRadService } from '../services/mapleradService';
 import { ledgerService } from '../services/ledgerService';
 import { WebhookEvent } from '../entities/WebhookEvent';
@@ -13,12 +14,21 @@ import { limitService } from '../services/limitService';
 import { riskService } from '../services/riskService';
 
 const router = Router();
-const mapleRadService = new MapleRadService();
+let mapleRadServiceInstance: MapleRadService | undefined;
+const getMapleRadService = () => (mapleRadServiceInstance ??= new MapleRadService());
+const mapleRadService = new Proxy({} as MapleRadService, {
+  get(_target, prop) {
+    const service = getMapleRadService();
+    const value = (service as any)[prop];
+    return typeof value === 'function' ? value.bind(service) : value;
+  },
+});
 const userRepo = AppDataSource.getRepository(User);
 const walletRepo = AppDataSource.getRepository(Wallet);
 const cardRepo = AppDataSource.getRepository(VirtualCard);
 const txRepo = AppDataSource.getRepository(Transaction);
 const webhookEventRepo = AppDataSource.getRepository(WebhookEvent);
+const providerReferenceRepo = AppDataSource.getRepository(ProviderReference);
 
 const cardResponse = (card: VirtualCard) => ({
   id: card.id,
@@ -43,14 +53,18 @@ const requireIdempotencyKey = (req: Request) => {
 };
 const recordWebhookEvent = async (eventData: any) => {
   if (!eventData?.eventId || !eventData?.event) return false;
-  const existing = await webhookEventRepo.findOne({ where: { id: eventData.eventId } });
+  const providerEnvironment = mapleRadService.getEnvironment();
+  const existing = await webhookEventRepo.findOne({
+    where: { provider: 'maplerad', providerEnvironment, providerEventId: eventData.eventId },
+  });
   if (existing) return true;
   try {
     await webhookEventRepo.save(
       webhookEventRepo.create({
-        id: eventData.eventId,
+        providerEventId: eventData.eventId,
         type: eventData.event,
         provider: 'maplerad',
+        providerEnvironment,
         reference: eventData.reference,
       })
     );
@@ -380,30 +394,67 @@ router.post('/cards/:id/unfreeze', async (req: Request, res: Response) => {
 
 export const mapleradWebhookHandler = async (req: Request, res: Response) => {
   try {
-    const rawBody = Buffer.isBuffer(req.body)
-      ? req.body.toString('utf8')
-      : (req as any).rawBody?.toString('utf8') || JSON.stringify(req.body);
+    const rawBodyBuffer = (req as any).rawBody;
+    if (!Buffer.isBuffer(rawBodyBuffer)) {
+      return res.status(400).json({ ok: false, message: 'Raw webhook body was not captured' });
+    }
+    const rawBody = rawBodyBuffer.toString('utf8');
 
     const svixId = req.headers['svix-id'] as string | undefined;
     const svixTimestamp = req.headers['svix-timestamp'] as string | undefined;
     const svixSignature = req.headers['svix-signature'] as string | undefined;
-
-    if (!svixId || !svixTimestamp || !svixSignature) {
-      return res.status(400).json({ ok: false, message: 'Missing Maplerad webhook signature headers' });
-    }
-    if (!mapleRadService.verifyWebhookSignature({ svixId, svixTimestamp, svixSignature }, rawBody)) {
-      return res.status(401).json({ ok: false, message: 'Invalid webhook signature' });
-    }
-
     const eventData = await mapleRadService.handleWebhook(rawBody);
 
-    if (eventData?.type === 'DEPOSIT_RECORDED') {
-      const duplicateEvent = await webhookEventRepo.findOne({ where: { id: eventData.eventId } });
+    if (mapleRadService.getWebhookVerificationMode() === 'disabled') {
+      const verification = await mapleRadService.verifyWebhookRequest({
+        headers: { svixId, svixTimestamp, svixSignature },
+        rawBody,
+        sourceIp: req.ip,
+        eventData,
+      });
+      if (!verification.ok) return res.status(verification.status).json({ ok: false, message: verification.message });
+      return res.status(200).json({ ok: true, ignored: true, verificationMode: 'disabled' });
+    }
+
+    if (eventData?.eventId) {
+      const duplicateEvent = await webhookEventRepo.findOne({
+        where: {
+          provider: 'maplerad',
+          providerEnvironment: mapleRadService.getEnvironment(),
+          providerEventId: eventData.eventId,
+        },
+      });
       if (duplicateEvent) return res.status(200).json({ ok: true, duplicate: true });
+    }
+
+    const verification = await mapleRadService.verifyWebhookRequest({
+      headers: { svixId, svixTimestamp, svixSignature },
+      rawBody,
+      sourceIp: req.ip,
+      eventData,
+    });
+    if (!verification.ok) {
+      if (verification.status === 202) {
+        await recordWebhookEvent(eventData);
+        return res.status(202).json({ ok: true, ignored: true, message: verification.message });
+      }
+      return res.status(verification.status).json({ ok: false, message: verification.message });
+    }
+
+    if (eventData?.type === 'DEPOSIT_RECORDED') {
       if (!eventData.amount || !eventData.currency || !eventData.customerId) {
         return res.status(200).json({ ok: true, ignored: true });
       }
-      const user = await userRepo.findOne({ where: { mapleradCustomerId: eventData.customerId } });
+      const providerReference = await providerReferenceRepo.findOne({
+        where: {
+          provider: 'maplerad',
+          providerEnvironment: mapleRadService.getEnvironment(),
+          providerCustomerId: eventData.customerId,
+        },
+      });
+      const user = providerReference
+        ? await userRepo.findOne({ where: { id: providerReference.userId } })
+        : undefined;
       if (user) {
         const wallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency: eventData.currency } });
         if (wallet) {
@@ -464,7 +515,16 @@ export const mapleradWebhookHandler = async (req: Request, res: Response) => {
     await auditService.log({ action: duplicate ? 'DEPOSIT_WEBHOOK_IGNORED' : 'WEBHOOK_RECEIVED', entityType: 'WebhookEvent', entityId: eventData?.eventId, metadata: { type: eventData?.type, duplicate }, req });
 
     if (eventData?.type === 'USD_ACCOUNT_APPROVED' && eventData.customerId && eventData.accountId) {
-      const user = await userRepo.findOne({ where: { mapleradCustomerId: eventData.customerId } });
+      const providerReference = await providerReferenceRepo.findOne({
+        where: {
+          provider: 'maplerad',
+          providerEnvironment: mapleRadService.getEnvironment(),
+          providerCustomerId: eventData.customerId,
+        },
+      });
+      const user = providerReference
+        ? await userRepo.findOne({ where: { id: providerReference.userId } })
+        : undefined;
       if (user) {
         const wallet = await walletRepo.findOne({ where: { user: { id: user.id } } });
         if (wallet) {

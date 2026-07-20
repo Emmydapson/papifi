@@ -6,7 +6,8 @@ import { MapleRadService } from './mapleradService';
 import { auditService } from './auditService';
 import { logger } from './logger';
 
-const mapleradService = new MapleRadService();
+let mapleradService: MapleRadService | undefined;
+const getMapleradService = () => (mapleradService ??= new MapleRadService());
 
 export class ReconciliationService {
   private running = false;
@@ -32,7 +33,7 @@ export class ReconciliationService {
       return repo.save(transaction);
     }
 
-    const status = await mapleradService.getProviderTransactionStatus(transaction.providerReference);
+    const status = await getMapleradService().getProviderTransactionStatus(transaction.providerReference);
     transaction.lastCheckedAt = new Date();
 
     if (!status) {

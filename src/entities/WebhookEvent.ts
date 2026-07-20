@@ -1,13 +1,20 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
-@Index(['provider', 'reference'], { unique: true })
+@Index(['provider', 'providerEnvironment', 'reference'], { unique: true })
+@Index(['provider', 'providerEnvironment', 'providerEventId'], { unique: true })
 @Entity()
 export class WebhookEvent {
-  @PrimaryColumn()
-  id: string; // event ID from Maplerad
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column()
+  providerEventId: string; // event ID from Maplerad
 
   @Column({ default: 'maplerad' })
   provider: string;
+
+  @Column({ default: 'production' })
+  providerEnvironment: string;
 
   @Column()
   type: string;

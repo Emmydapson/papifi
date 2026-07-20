@@ -8,7 +8,9 @@ import { Currency, Wallet } from '../entities/Wallet';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
 import { AuditLog } from '../entities/AuditLog';
+import { ProviderReference } from '../entities/ProviderReference';
 import { logger } from './logger';
+import { resolveMapleradConfig, ResolvedMapleradConfig } from '../config/maplerad';
 
 type MapleradEnvelope<T> = {
   status?: string | boolean;
@@ -99,6 +101,10 @@ type MapleradWebhookHeaders = {
   svixSignature?: string;
 };
 
+export type MapleradWebhookVerificationResult =
+  | { ok: true; mode: 'signature' | 'ip_and_requery' | 'disabled'; warning?: string }
+  | { ok: false; status: number; message: string; mode: 'signature' | 'ip_and_requery' | 'disabled' };
+
 export type MapleradWebhookEvent = {
   type: string;
   event: string;
@@ -126,15 +132,20 @@ export type MapleradWebhookEvent = {
 
  
 export class MapleRadService {
-  private readonly baseUrl = this.normalizeBaseUrl(process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1');
-  private readonly secretKey = process.env.MAPLERAD_SECRET || process.env.MAPLERAD_SECRET_KEY;
-  private readonly publicKey = process.env.MAPLERAD_PUBLIC || process.env.MAPLERAD_PUBLIC_KEY;
-  private readonly webhookSecret = process.env.MAPLERAD_WEBHOOK_SECRET;
+  private readonly config: ResolvedMapleradConfig = resolveMapleradConfig();
+  private readonly baseUrl = this.config.baseUrl;
+  private readonly environment = this.config.environment;
+  private readonly secretKey = this.config.secretKey;
+  private readonly publicKey = this.config.publicKey;
+  private readonly webhookSecret = this.config.webhookSecret;
+  private readonly previousWebhookSecret = this.config.previousWebhookSecret;
+  private readonly webhookVerificationMode = this.config.webhookVerificationMode;
 
   private userRepo = AppDataSource.getRepository(User);
   private walletRepo = AppDataSource.getRepository(Wallet);
   private txRepo = AppDataSource.getRepository(Transaction);
   private cardRepo = AppDataSource.getRepository(VirtualCard);
+  private providerReferenceRepo = AppDataSource.getRepository(ProviderReference);
 
   private http: AxiosInstance;
  
@@ -190,6 +201,22 @@ export class MapleRadService {
 
   getProviderName(): string {
     return 'MapleRad';
+  }
+
+  getEnvironment() {
+    return this.environment;
+  }
+
+  getWebhookVerificationMode() {
+    return this.webhookVerificationMode;
+  }
+
+  getWebhookConfigSummary() {
+    return {
+      mode: this.webhookVerificationMode,
+      secretConfigured: this.config.webhookSecretConfigured,
+      secretFormatValid: this.config.webhookSecretFormatValid,
+    };
   }
 
   private normalizeBaseUrl(url: string) {
@@ -328,6 +355,23 @@ export class MapleRadService {
     return { ok: mismatches.length === 0, mismatches };
   }
 
+  private lockUser(manager: EntityManager, userId: string) {
+    return manager
+      .getRepository(User)
+      .createQueryBuilder('user')
+      .where('user.id = :userId', { userId })
+      .setLock('pessimistic_write')
+      .getOne();
+  }
+
+  private providerReferenceWhere(userId: string) {
+    return {
+      userId,
+      provider: 'maplerad',
+      providerEnvironment: this.environment,
+    };
+  }
+
   private getSecretHeaders() {
     if (!this.secretKey) throw new Error('Missing Maplerad secret key');
     return {
@@ -374,14 +418,28 @@ export class MapleRadService {
   }
 
   private async ensureMapleRadCustomerForUser(userId: string, manager: EntityManager): Promise<string> {
-    const user = await manager.getRepository(User).findOne({
-      where: { id: userId },
-      lock: { mode: 'pessimistic_write' },
-    });
+    const user = await this.lockUser(manager, userId);
     if (!user) throw new Error('User not found');
 
-    if (user.mapleradCustomerId) {
-      const customer = await this.getCustomerById(user.mapleradCustomerId);
+    let reference = await manager.getRepository(ProviderReference).findOne({
+      where: this.providerReferenceWhere(user.id),
+    });
+
+    if (!reference && this.environment === 'production' && user.mapleradCustomerId) {
+      reference = manager.getRepository(ProviderReference).create({
+        user,
+        userId: user.id,
+        provider: 'maplerad',
+        providerEnvironment: 'production',
+        providerCustomerId: user.mapleradCustomerId,
+        status: 'legacy_imported',
+        metadata: { source: 'user.mapleradCustomerId' },
+      });
+      await manager.getRepository(ProviderReference).save(reference);
+    }
+
+    if (reference?.providerCustomerId) {
+      const customer = await this.getCustomerById(reference.providerCustomerId);
       const match = this.validateCustomerMatch(user, customer);
       if (!match.ok) {
         throw new MapleradProviderError(
@@ -394,7 +452,7 @@ export class MapleRadService {
           'VALIDATION'
         );
       }
-      return user.mapleradCustomerId;
+      return reference.providerCustomerId;
     }
 
     const payload = {
@@ -425,8 +483,15 @@ export class MapleRadService {
         );
       }
 
-      user.mapleradCustomerId = customerId;
-      await manager.getRepository(User).save(user);
+      reference = manager.getRepository(ProviderReference).create({
+        user,
+        userId: user.id,
+        provider: 'maplerad',
+        providerEnvironment: this.environment,
+        providerCustomerId: customerId,
+        status: 'active',
+      });
+      await manager.getRepository(ProviderReference).save(reference);
       return customerId;
     } catch (error) {
       if (
@@ -452,17 +517,23 @@ export class MapleRadService {
     const providerCustomer = await this.getCustomerById(customerId);
 
     return AppDataSource.transaction(async (manager) => {
-      const user = await manager.getRepository(User).findOne({
-        where: { id: userId },
-        lock: { mode: 'pessimistic_write' },
-      });
+      const user = await this.lockUser(manager, userId);
       if (!user) throw new Error('Papafi user not found');
-      if (user.mapleradCustomerId && user.mapleradCustomerId !== customerId) {
-        throw new Error('Papafi user is already linked to a different Maplerad customer');
+
+      const repo = manager.getRepository(ProviderReference);
+      const existingReference = await repo.findOne({ where: this.providerReferenceWhere(user.id) });
+      if (existingReference?.providerCustomerId && existingReference.providerCustomerId !== customerId) {
+        throw new Error(`Papafi user is already linked to a different ${this.environment} Maplerad customer`);
       }
 
-      const existingUser = await manager.getRepository(User).findOne({ where: { mapleradCustomerId: customerId } });
-      if (existingUser && existingUser.id !== user.id) {
+      const existingCustomerReference = await repo.findOne({
+        where: {
+          provider: 'maplerad',
+          providerEnvironment: this.environment,
+          providerCustomerId: customerId,
+        },
+      });
+      if (existingCustomerReference && existingCustomerReference.userId !== user.id) {
         throw new Error('Maplerad customer ID is already linked to another Papafi user');
       }
 
@@ -496,8 +567,15 @@ export class MapleRadService {
         };
       }
 
-      user.mapleradCustomerId = customerId;
-      await manager.getRepository(User).save(user);
+      const savedReference = existingReference || repo.create({
+        user,
+        userId: user.id,
+        provider: 'maplerad',
+        providerEnvironment: this.environment,
+      });
+      savedReference.providerCustomerId = customerId;
+      savedReference.status = 'active';
+      await repo.save(savedReference);
       await manager.getRepository(AuditLog).save(
         manager.getRepository(AuditLog).create({
           actorUserId: user.id,
@@ -616,18 +694,33 @@ export class MapleRadService {
     }
 
     return AppDataSource.transaction(async (manager) => {
-      const user = await manager.getRepository(User).findOne({
-        where: { id: userId },
-        relations: ['wallets'],
-        lock: { mode: 'pessimistic_write' },
-      });
+      const user = await this.lockUser(manager, userId);
       if (!user) throw new Error(`MapleRad Error: User ${userId} not found`);
 
       const walletRepo = manager.getRepository(Wallet);
+      const referenceRepo = manager.getRepository(ProviderReference);
       const existingWallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
-      if (existingWallet?.accountNumber && existingWallet?.mapleradAccountId) return existingWallet;
+      let reference = await referenceRepo.findOne({ where: this.providerReferenceWhere(user.id) });
+      if (existingWallet?.accountNumber && existingWallet?.mapleradAccountId && reference?.providerAccountId) return existingWallet;
 
       const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
+      reference = await referenceRepo.findOne({ where: this.providerReferenceWhere(user.id) });
+      if (reference?.providerAccountId && reference.accountNumber) {
+        const wallet = this.applyVirtualAccountToWallet(
+          existingWallet || walletRepo.create({ user }),
+          {
+            id: reference.providerAccountId,
+            account_id: reference.providerAccountId,
+            account_number: reference.accountNumber,
+            bank_name: reference.bankName,
+            currency,
+          },
+          currency
+        );
+        await walletRepo.save(wallet);
+        return wallet;
+      }
+
       const providerAccounts = await this.getCustomerVirtualAccounts(customerId);
       let data = this.findProviderVirtualAccount(providerAccounts, currency);
 
@@ -656,6 +749,23 @@ export class MapleRadService {
 
       const wallet = this.applyVirtualAccountToWallet(existingWallet || walletRepo.create({ user }), data, currency);
       await walletRepo.save(wallet);
+
+      const savedReference = reference || referenceRepo.create({
+        user,
+        userId: user.id,
+        provider: 'maplerad',
+        providerEnvironment: this.environment,
+        providerCustomerId: customerId,
+        status: 'active',
+      });
+      savedReference.providerCustomerId = customerId;
+      savedReference.providerAccountId = data.id || data.account_id;
+      savedReference.accountNumber = data.account_number;
+      savedReference.bankName = data.bank_name || data.bank?.name;
+      savedReference.currency = currency;
+      savedReference.status = String(data.status || 'active');
+      savedReference.metadata = { accountStatus: data.status };
+      await referenceRepo.save(savedReference);
 
       return data;
     });
@@ -877,11 +987,13 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
   /** -------------------------------
    * WEBHOOK
    * ------------------------------- */
-  verifyWebhookSignature(headersOrSignature: MapleradWebhookHeaders | string, body: string): boolean {
-    if (!this.webhookSecret) throw new Error('Missing MAPLERAD_WEBHOOK_SECRET');
-    if (typeof headersOrSignature === 'string') return false;
+  private svixSecretBytes(secret: string) {
+    if (!secret.startsWith('whsec_')) throw new Error('Maplerad webhook signing secret must begin with whsec_');
+    return Buffer.from(secret.slice('whsec_'.length), 'base64');
+  }
 
-    const { svixId, svixTimestamp, svixSignature } = headersOrSignature;
+  private verifyWebhookSignatureWithSecret(secret: string, headers: MapleradWebhookHeaders, body: string): boolean {
+    const { svixId, svixTimestamp, svixSignature } = headers;
     if (!svixId || !svixTimestamp || !svixSignature) return false;
 
     const timestamp = Number(svixTimestamp);
@@ -889,18 +1001,107 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
     const toleranceSeconds = Number(process.env.MAPLERAD_WEBHOOK_TOLERANCE_SECONDS || 300);
     if (Math.abs(Math.floor(Date.now() / 1000) - timestamp) > toleranceSeconds) return false;
 
-    const secret = this.webhookSecret.startsWith('whsec_') ? this.webhookSecret.split('_')[1] : this.webhookSecret;
-    const secretBytes = Buffer.from(secret, 'base64');
     const signedContent = `${svixId}.${svixTimestamp}.${body}`;
-    const expected = crypto.createHmac('sha256', secretBytes).update(signedContent).digest('base64');
+    const expected = crypto.createHmac('sha256', this.svixSecretBytes(secret)).update(signedContent).digest('base64');
     const expectedBuffer = Buffer.from(expected);
 
     return svixSignature.split(' ').some((entry) => {
-      const signature = entry.includes(',') ? entry.split(',')[1] : entry;
+      const [version, signature] = entry.includes(',') ? entry.split(',', 2) : ['', entry];
+      if (version && version !== 'v1') return false;
       if (!signature) return false;
       const receivedBuffer = Buffer.from(signature);
       return receivedBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(receivedBuffer, expectedBuffer);
     });
+  }
+
+  verifyWebhookSignature(headersOrSignature: MapleradWebhookHeaders | string, body: string): boolean {
+    if (!this.webhookSecret) throw new Error(`Missing Maplerad ${this.environment} webhook signing secret`);
+    if (typeof headersOrSignature === 'string') return false;
+
+    return (
+      this.verifyWebhookSignatureWithSecret(this.webhookSecret, headersOrSignature, body) ||
+      Boolean(this.previousWebhookSecret && this.verifyWebhookSignatureWithSecret(this.previousWebhookSecret, headersOrSignature, body))
+    );
+  }
+
+  isAllowedWebhookSourceIp(ip?: string) {
+    if (!ip) return false;
+    return this.config.webhookAllowedIps.includes(ip);
+  }
+
+  async verifyWebhookByProviderRequery(eventData: MapleradWebhookEvent): Promise<boolean> {
+    if (!eventData?.eventId || !eventData?.event || !eventData.reference) return false;
+
+    try {
+      if (eventData.type === 'DEPOSIT_RECORDED') {
+        const providerTx = await this.getTransactionById(eventData.reference);
+        const status = String(providerTx?.status || '').toLowerCase();
+        const amount = Number(providerTx?.amount) / 100;
+        return (
+          ['success', 'successful', 'completed'].includes(status) &&
+          Number(eventData.amount) === amount &&
+          providerTx?.currency === eventData.currency &&
+          (providerTx?.customer_id === eventData.customerId || providerTx?.customer?.id === eventData.customerId)
+        );
+      }
+
+      if (eventData.type === 'TRANSFER_EVENT') {
+        const providerTx = await this.getTransactionById(eventData.reference);
+        const status = String(providerTx?.status || '').toLowerCase();
+        if (eventData.event === 'transfer.successful') return ['success', 'successful', 'completed'].includes(status);
+        if (eventData.event === 'transfer.failed') return ['failed', 'declined', 'reversed'].includes(status);
+      }
+
+      return false;
+    } catch (error) {
+      logger.warn('maplerad_webhook_requery_failed', {
+        eventId: eventData.eventId,
+        event: eventData.event,
+        reference: eventData.reference,
+      });
+      return false;
+    }
+  }
+
+  async verifyWebhookRequest(input: {
+    headers: MapleradWebhookHeaders;
+    rawBody: string;
+    sourceIp?: string;
+    eventData?: MapleradWebhookEvent;
+  }): Promise<MapleradWebhookVerificationResult> {
+    if (this.webhookVerificationMode === 'disabled') {
+      if (process.env.NODE_ENV === 'production') {
+        return { ok: false, status: 500, message: 'Webhook verification disabled is not allowed in production', mode: 'disabled' };
+      }
+      return { ok: true, mode: 'disabled', warning: 'Webhook verification disabled for local/test only' };
+    }
+
+    if (this.webhookVerificationMode === 'signature') {
+      if (!input.headers.svixId || !input.headers.svixTimestamp || !input.headers.svixSignature) {
+        return { ok: false, status: 400, message: 'Missing Maplerad webhook signature headers', mode: 'signature' };
+      }
+      if (!this.verifyWebhookSignature(input.headers, input.rawBody)) {
+        return { ok: false, status: 401, message: 'Invalid Maplerad webhook signature', mode: 'signature' };
+      }
+      return { ok: true, mode: 'signature' };
+    }
+
+    if (!this.isAllowedWebhookSourceIp(input.sourceIp)) {
+      return { ok: false, status: 401, message: 'Unrecognized Maplerad webhook source IP', mode: 'ip_and_requery' };
+    }
+    if (!input.eventData?.eventId || !input.eventData?.event) {
+      return { ok: false, status: 400, message: 'Missing Maplerad webhook event id or type', mode: 'ip_and_requery' };
+    }
+    const verified = await this.verifyWebhookByProviderRequery(input.eventData);
+    if (!verified) {
+      return { ok: false, status: 202, message: 'Maplerad webhook accepted but not processed because provider re-query did not confirm it', mode: 'ip_and_requery' };
+    }
+    logger.warn('maplerad_webhook_signature_unavailable_fallback_used', {
+      eventId: input.eventData.eventId,
+      event: input.eventData.event,
+      providerEnvironment: this.environment,
+    });
+    return { ok: true, mode: 'ip_and_requery', warning: 'Signature verification unavailable; IP and provider re-query fallback used' };
   }
 
  async handleWebhook(rawBody: string) {

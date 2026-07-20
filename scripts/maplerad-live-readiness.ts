@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import crypto from 'crypto';
 import axios, { AxiosError } from 'axios';
+import { resolveMapleradConfig } from '../src/config/maplerad';
 
 type StepStatus = 'PASS' | 'FAIL' | 'SKIP';
 
@@ -11,14 +12,18 @@ type StepResult = {
 };
 
 const results: StepResult[] = [];
-const secretKey = process.env.MAPLERAD_SECRET_KEY || process.env.MAPLERAD_SECRET;
-const environment = process.env.MAPLERAD_ENVIRONMENT || process.env.MAPLERAD_ENV || process.env.NODE_ENV || 'unspecified';
-const liveTestsEnabled = process.env.MAPLERAD_LIVE_TESTS_ENABLED === 'true';
-const testEmail = process.env.MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL;
-const testPhone = process.env.MAPLERAD_LIVE_TEST_PHONE;
-const testBvn = process.env.MAPLERAD_LIVE_TEST_BVN;
+const config = resolveMapleradConfig({ allowMissingSignatureSecret: true, allowMalformedWebhookSecret: true });
+const secretKey = config.secretKey;
+const environment = config.environment;
+const sandboxTestsEnabled = process.env.MAPLERAD_SANDBOX_TESTS_ENABLED === 'true';
+const sandboxCustomerCreationEnabled = process.env.MAPLERAD_SANDBOX_CUSTOMER_CREATION_ENABLED === 'true';
+const sandboxWalletCreationEnabled = process.env.MAPLERAD_SANDBOX_WALLET_CREATION_ENABLED === 'true';
+const deprecatedLiveTestsEnabled = process.env.MAPLERAD_LIVE_TESTS_ENABLED === 'true';
+const testEmail = process.env.MAPLERAD_SANDBOX_TEST_EMAIL || process.env.MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL;
+const testPhone = process.env.MAPLERAD_SANDBOX_TEST_PHONE || process.env.MAPLERAD_LIVE_TEST_PHONE;
+const testBvn = process.env.MAPLERAD_SANDBOX_TEST_BVN || process.env.MAPLERAD_LIVE_TEST_BVN;
 const outputFile = process.env.MAPLERAD_READINESS_OUTPUT_FILE;
-const baseUrl = normalizeBaseUrl(process.env.MAPLERAD_BASE_URL || 'https://api.maplerad.com/v1');
+const baseUrl = config.baseUrl;
 
 const http = axios.create({
   baseURL: baseUrl,
@@ -138,18 +143,36 @@ async function providerRequest(method: 'GET' | 'POST', endpoint: string, body?: 
 }
 
 async function main() {
-  console.log('Maplerad live readiness check');
+  console.log('Maplerad readiness check');
   console.log(`Environment: ${environment}`);
   console.log(`Base URL: ${baseUrl}`);
   console.log(`Secret key configured: ${secretKey ? 'yes' : 'no'}`);
-  console.log(`Live customer creation enabled: ${liveTestsEnabled ? 'yes' : 'no'}`);
-  if (liveTestsEnabled) {
-    console.log('Warning: direct readiness customers are not linked to Papafi users. Use maplerad:reconcile-customer before Papafi wallet creation.');
+  console.log(`Webhook verification mode: ${config.webhookVerificationMode}`);
+  console.log(`Webhook signing secret configured: ${config.webhookSecretConfigured ? 'yes' : 'no'}`);
+  console.log(
+    `Webhook signing secret format valid: ${
+      config.webhookSecretFormatValid === 'not-configured' ? 'not-configured' : config.webhookSecretFormatValid ? 'yes' : 'no'
+    }`
+  );
+  console.log(`Sandbox tests enabled: ${sandboxTestsEnabled ? 'yes' : 'no'}`);
+  console.log(`Sandbox customer creation enabled: ${sandboxCustomerCreationEnabled ? 'yes' : 'no'}`);
+  console.log(`Sandbox wallet creation enabled: ${sandboxWalletCreationEnabled ? 'yes' : 'no'}`);
+  if (deprecatedLiveTestsEnabled) {
+    console.log('Warning: MAPLERAD_LIVE_TESTS_ENABLED is deprecated and ignored by readiness. Use MAPLERAD_SANDBOX_TESTS_ENABLED for sandbox checks.');
   }
 
   await step('Configuration', async () => {
     if (!secretKey) throw new Error('Missing MAPLERAD_SECRET_KEY or MAPLERAD_SECRET');
     if (!baseUrl.startsWith('https://')) throw new Error('Maplerad base URL must use HTTPS');
+    if (config.webhookVerificationMode === 'signature' && !config.webhookSecretConfigured) {
+      throw new Error(`signature mode requires MAPLERAD_${environment.toUpperCase()}_WEBHOOK_SECRET from Maplerad`);
+    }
+    if (config.webhookSecretFormatValid === false) {
+      throw new Error('configured Maplerad webhook signing secret is malformed; it must begin with whsec_ and must not be an API key');
+    }
+    if (config.webhookVerificationMode === 'ip_and_requery') {
+      console.log('Warning: webhook signature verification is unavailable; ip_and_requery is a temporary fallback and not equivalent to signature verification.');
+    }
     return 'secret present, HTTPS base URL configured';
   });
 
@@ -160,11 +183,11 @@ async function main() {
     return 'GET /customers succeeded';
   });
 
-  if (liveTestsEnabled) {
+  if (environment === 'sandbox' && sandboxTestsEnabled && sandboxCustomerCreationEnabled) {
     if (!testEmail) {
-      skip('Tier 0 test customer creation', 'MAPLERAD_LIVE_TEST_CUSTOMER_EMAIL is required when MAPLERAD_LIVE_TESTS_ENABLED=true');
+      skip('Sandbox tier 0 test customer creation', 'MAPLERAD_SANDBOX_TEST_EMAIL is required');
     } else {
-      await step('Tier 0 test customer creation', async () => {
+      await step('Sandbox tier 0 test customer creation', async () => {
         const localPart = testEmail.split('@')[0] || 'papafi';
         const response = await providerRequest('POST', '/customers', {
           first_name: 'Papafi',
@@ -193,20 +216,32 @@ async function main() {
         }
         console.log(`  Maplerad customer id: ${data.id}`);
         console.log(`  Reconcile with: ${instruction}`);
-        return 'created readiness customer; explicit reconciliation required before Papafi wallet creation';
+        return 'created sandbox readiness customer; explicit reconciliation required before Papafi wallet creation';
       });
     }
+  } else if (environment === 'production') {
+    skip('Sandbox tier 0 test customer creation', 'active environment is production; readiness will not create production customers');
   } else {
-    skip('Tier 0 test customer creation', 'MAPLERAD_LIVE_TESTS_ENABLED is not true');
+    skip('Sandbox tier 0 test customer creation', 'requires MAPLERAD_SANDBOX_TESTS_ENABLED=true and MAPLERAD_SANDBOX_CUSTOMER_CREATION_ENABLED=true');
   }
 
-  if (testBvn || testPhone) {
-    skip('BVN/identity live check', 'Identity tests are intentionally refused by this script; run only through controlled Papafi smoke test with authorized test BVN.');
+  if (environment === 'sandbox' && sandboxTestsEnabled && testBvn) {
+    await step('Sandbox BVN/identity check', async () => {
+      const response = await providerRequest('POST', '/identity/bvn', { bvn: testBvn });
+      if (!response.data || typeof response.data !== 'object') throw new Error('Schema mismatch: expected JSON object response');
+      return 'sandbox BVN endpoint accepted documented test value';
+    });
   } else {
-    skip('BVN/identity live check', 'No authorized test BVN supplied');
+    skip('Sandbox BVN/identity check', 'requires sandbox mode, MAPLERAD_SANDBOX_TESTS_ENABLED=true, and official MAPLERAD_SANDBOX_TEST_BVN');
   }
 
-  skip('Transfers/cards/deposits', 'Money movement is not performed by readiness checks');
+  if (environment === 'sandbox' && sandboxTestsEnabled && sandboxWalletCreationEnabled) {
+    skip('Sandbox virtual-account creation', 'not run directly by readiness without a Papafi user/customer reconciliation flow');
+  } else {
+    skip('Sandbox virtual-account creation', 'requires MAPLERAD_SANDBOX_WALLET_CREATION_ENABLED=true and should be tested through Papafi wallet onboarding');
+  }
+
+  skip('Transfers/cards/deposits', 'Money movement and issuing are not performed by readiness checks');
   printSummary();
 }
 

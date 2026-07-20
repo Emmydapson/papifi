@@ -6,7 +6,8 @@ import { isMapleradProviderError, mapleradErrorToHttpStatus, MapleRadService } f
 import { auditService } from '../services/auditService';
 import { logger } from '../services/logger';
 
-const mapleRadService = new MapleRadService();
+let mapleRadServiceInstance: MapleRadService | undefined;
+const getMapleRadService = () => (mapleRadServiceInstance ??= new MapleRadService());
 const kycRepo = AppDataSource.getRepository(KycVerification);
 const userRepo = AppDataSource.getRepository(User);
 
@@ -56,7 +57,7 @@ class KYCController {
     }
 
     try {
-      const providerResponse = await mapleRadService.verifyBvn(String(bvn));
+      const providerResponse = await getMapleRadService().verifyBvn(String(bvn));
       const providerStatus = String(providerResponse?.status || providerResponse?.verification_status || '').toLowerCase();
       const passed = Boolean(
         providerResponse?.id ||
