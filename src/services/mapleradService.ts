@@ -50,6 +50,43 @@ type MapleradRequestOptions = {
   params?: Record<string, unknown>;
 };
 
+export type MapleradProviderErrorCode =
+  | 'VALIDATION'
+  | 'AUTH'
+  | 'NOT_FOUND'
+  | 'RATE_LIMIT'
+  | 'ACCOUNT'
+  | 'TIMEOUT'
+  | 'NETWORK'
+  | 'PROVIDER'
+  | 'SCHEMA';
+
+export type MapleradApplicationErrorCode =
+  | 'BVN_NOT_VERIFIED'
+  | 'BVN_INVALID'
+  | 'BVN_IDENTITY_MISMATCH'
+  | 'BVN_REVIEW_REQUIRED'
+  | 'MAPLERAD_INSUFFICIENT_BALANCE'
+  | 'MAPLERAD_AUTHENTICATION_FAILED'
+  | 'MAPLERAD_CONFIGURATION_ERROR'
+  | 'MAPLERAD_VALIDATION_ERROR'
+  | 'MAPLERAD_CONTRACT_ERROR'
+  | 'MAPLERAD_RATE_LIMITED'
+  | 'MAPLERAD_UNAVAILABLE';
+
+export type MapleradBvnVerificationResult = {
+  verified: boolean;
+  applicationCode: 'BVN_VERIFIED' | 'BVN_NOT_VERIFIED';
+  providerHttpStatus?: number;
+  providerRequestId?: string;
+  providerStatus?: unknown;
+  providerCode?: unknown;
+  providerMessage?: string;
+  responseKeys: string[];
+  dataKeys: string[];
+  data: Record<string, unknown>;
+};
+
 export class MapleradProviderError extends Error {
   constructor(
     message: string,
@@ -58,7 +95,7 @@ export class MapleradProviderError extends Error {
     public readonly providerMessage?: string,
     public readonly requestId?: string,
     public readonly safeResponseBody?: unknown,
-    public readonly code: 'VALIDATION' | 'AUTH' | 'NOT_FOUND' | 'TIMEOUT' | 'NETWORK' | 'PROVIDER' | 'SCHEMA' = 'PROVIDER'
+    public readonly code: MapleradProviderErrorCode = 'PROVIDER'
   ) {
     super(message);
     this.name = 'MapleradProviderError';
@@ -73,8 +110,23 @@ export const mapleradErrorToHttpStatus = (error: unknown) => {
   if (error.code === 'VALIDATION') return error.providerStatus === 422 ? 422 : 400;
   if (error.code === 'AUTH') return 502;
   if (error.code === 'NOT_FOUND') return 400;
+  if (error.code === 'RATE_LIMIT') return 429;
+  if (error.code === 'ACCOUNT') return 503;
   if (error.code === 'SCHEMA') return 502;
   return 502;
+};
+
+export const mapleradErrorToApplicationCode = (error: unknown): MapleradApplicationErrorCode => {
+  if (!isMapleradProviderError(error)) return 'MAPLERAD_UNAVAILABLE';
+  const message = String(error.providerMessage || '').toLowerCase();
+  if (error.code === 'ACCOUNT' || message.includes('insufficient balance')) return 'MAPLERAD_INSUFFICIENT_BALANCE';
+  if (error.code === 'AUTH') {
+    return error.providerStatus === 403 ? 'MAPLERAD_CONFIGURATION_ERROR' : 'MAPLERAD_AUTHENTICATION_FAILED';
+  }
+  if (error.code === 'VALIDATION' || error.code === 'NOT_FOUND') return 'MAPLERAD_VALIDATION_ERROR';
+  if (error.code === 'RATE_LIMIT') return 'MAPLERAD_RATE_LIMITED';
+  if (error.code === 'SCHEMA') return 'MAPLERAD_CONTRACT_ERROR';
+  return 'MAPLERAD_UNAVAILABLE';
 };
 
 type MapleradTransfer = {
@@ -279,22 +331,30 @@ export class MapleRadService {
   }
 
   private providerMessage(body: any) {
-    const value = body?.message || body?.error || body?.errors?.[0]?.message || body?.detail;
+    const value = body?.message || body?.error || body?.errors?.[0]?.message || body?.detail || body?.data?.message;
     return value ? String(value).slice(0, 240) : undefined;
   }
 
-  private providerErrorCode(status?: number, message?: string, axiosCode?: string): MapleradProviderError['code'] {
+  private providerErrorCode(status?: number, message?: string, axiosCode?: string): MapleradProviderErrorCode {
     const lower = String(message || '').toLowerCase();
     if (axiosCode === 'ECONNABORTED') return 'TIMEOUT';
     if (!status) return 'NETWORK';
+    if (
+      lower.includes('insufficient balance') ||
+      lower.includes('account not funded') ||
+      lower.includes('service not enabled')
+    ) {
+      return 'ACCOUNT';
+    }
     if (status === 401 || status === 403) return 'AUTH';
     if (status === 404) return 'NOT_FOUND';
+    if (status === 429) return 'RATE_LIMIT';
     if (status === 400 || status === 422) return 'VALIDATION';
     if (lower.includes('validation')) return 'VALIDATION';
     return 'PROVIDER';
   }
 
-  private async requestMaplerad<T>(options: MapleradRequestOptions): Promise<T> {
+  private async requestMapleradRaw<T>(options: MapleradRequestOptions): Promise<AxiosResponse<MapleradEnvelope<T> | T>> {
     try {
       const res = await this.http.request<MapleradEnvelope<T> | T>({
         method: options.method,
@@ -310,7 +370,7 @@ export class MapleRadService {
         status: res.status,
         requestId: this.providerRequestId(res.headers),
       });
-      return this.unwrap<T>(res);
+      return res;
     } catch (error: any) {
       const status = error?.response?.status;
       const safeBody = this.sanitizeProviderPayload(error?.response?.data);
@@ -339,12 +399,16 @@ export class MapleRadService {
     }
   }
 
+  private async requestMaplerad<T>(options: MapleradRequestOptions): Promise<T> {
+    return this.unwrap<T>(await this.requestMapleradRaw<T>(options));
+  }
+
   private normalize(value?: string | null) {
     return String(value || '').trim().toLowerCase();
   }
 
   private normalizeName(value?: string | null) {
-    return this.normalize(value).replace(/\s+/g, ' ');
+    return this.normalizeIdentityName(value);
   }
 
   private validateCustomerMatch(user: User, customer: MapleradCustomer) {
@@ -600,7 +664,138 @@ export class MapleRadService {
     });
   }
 
-  async verifyBvn(bvn: string): Promise<any> {
+  private objectKeys(value: unknown) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value as Record<string, unknown>).sort() : [];
+  }
+
+  private bvnDataFromEnvelope(envelope: unknown): Record<string, unknown> | undefined {
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return undefined;
+    const record = envelope as Record<string, unknown>;
+    const data = record.data && typeof record.data === 'object' && !Array.isArray(record.data)
+      ? record.data as Record<string, unknown>
+      : record;
+    return data;
+  }
+
+  private parseBvnVerificationResponse(input: {
+    envelope: unknown;
+    providerHttpStatus?: number;
+    providerRequestId?: string;
+  }): MapleradBvnVerificationResult {
+    const envelope = input.envelope && typeof input.envelope === 'object' && !Array.isArray(input.envelope)
+      ? input.envelope as Record<string, unknown>
+      : undefined;
+    const data = this.bvnDataFromEnvelope(input.envelope);
+    const responseKeys = this.objectKeys(envelope);
+    const dataKeys = this.objectKeys(data);
+
+    if (!envelope || !data) {
+      throw new MapleradProviderError(
+        'Maplerad BVN verification returned malformed response',
+        'maplerad.identity.verify_bvn',
+        input.providerHttpStatus,
+        'malformed response',
+        input.providerRequestId,
+        this.sanitizeProviderPayload(input.envelope),
+        'SCHEMA'
+      );
+    }
+
+    const providerStatus = data.status ?? data.verification_status ?? envelope.status;
+    const providerCode = data.code ?? envelope.code;
+    const providerMessage = this.providerMessage(data) || this.providerMessage(envelope);
+    const indicators = [
+      data.verified,
+      data.valid,
+      data.is_valid,
+      data.is_verified,
+      providerStatus,
+      data.status_text,
+      data.verification_status,
+    ].map((value) => String(value ?? '').trim().toLowerCase());
+    const message = String(providerMessage || '').toLowerCase();
+
+    const explicitSuccess = indicators.some((value) =>
+      ['true', 'success', 'successful', 'verified', 'valid', 'completed', 'passed'].includes(value)
+    );
+    const hasIdentityDetails = Boolean(
+      data.id ||
+      data.first_name ||
+      data.last_name ||
+      data.middle_name ||
+      data.name ||
+      data.date_of_birth ||
+      data.dob ||
+      data.phone_number ||
+      data.phone
+    );
+
+    if (explicitSuccess || hasIdentityDetails) {
+      return {
+        verified: true,
+        applicationCode: 'BVN_VERIFIED',
+        providerHttpStatus: input.providerHttpStatus,
+        providerRequestId: input.providerRequestId,
+        providerStatus,
+        providerCode,
+        providerMessage,
+        responseKeys,
+        dataKeys,
+        data,
+      };
+    }
+
+    const explicitNotVerified =
+      indicators.some((value) => ['false', 'failed', 'failure', 'invalid', 'unverified', 'not_found', 'not found'].includes(value)) ||
+      message.includes('invalid bvn') ||
+      message.includes('bvn not found') ||
+      message.includes('not verified') ||
+      message.includes('unable to verify bvn');
+
+    if (explicitNotVerified) {
+      return {
+        verified: false,
+        applicationCode: 'BVN_NOT_VERIFIED',
+        providerHttpStatus: input.providerHttpStatus,
+        providerRequestId: input.providerRequestId,
+        providerStatus,
+        providerCode,
+        providerMessage,
+        responseKeys,
+        dataKeys,
+        data,
+      };
+    }
+
+    throw new MapleradProviderError(
+      'Maplerad BVN verification returned an unrecognised success response',
+      'maplerad.identity.verify_bvn',
+      input.providerHttpStatus,
+      'unrecognised BVN response contract',
+      input.providerRequestId,
+      this.sanitizeProviderPayload(input.envelope),
+      'SCHEMA'
+    );
+  }
+
+  normalizeIdentityName(value?: string | null) {
+    return String(value || '')
+      .normalize('NFKC')
+      .trim()
+      .replace(/[.'-]/g, '')
+      .replace(/\s+/g, ' ')
+      .toLocaleLowerCase('en-US');
+  }
+
+  normalizeNigerianPhone(value?: string | null) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (/^0[789]\d{9}$/.test(digits)) return `+234${digits.slice(1)}`;
+    if (/^234[789]\d{9}$/.test(digits)) return `+${digits}`;
+    if (/^[789]\d{9}$/.test(digits)) return `+234${digits}`;
+    return undefined;
+  }
+
+  async verifyBvn(bvn: string): Promise<MapleradBvnVerificationResult> {
     const normalizedBvn = String(bvn).trim();
     if (!/^\d{11}$/.test(normalizedBvn)) {
       throw new MapleradProviderError(
@@ -614,26 +809,18 @@ export class MapleRadService {
       );
     }
 
-    const data = await this.requestMaplerad<any>({
+    const response = await this.requestMapleradRaw<any>({
       operation: 'maplerad.identity.verify_bvn',
       method: 'POST',
       path: '/identity/bvn',
       payload: { bvn: normalizedBvn },
     });
 
-    if (!data || typeof data !== 'object') {
-      throw new MapleradProviderError(
-        'Maplerad BVN verification returned malformed response',
-        'maplerad.identity.verify_bvn',
-        undefined,
-        'malformed response',
-        undefined,
-        this.sanitizeProviderPayload(data),
-        'SCHEMA'
-      );
-    }
-
-    return data;
+    return this.parseBvnVerificationResponse({
+      envelope: response.data,
+      providerHttpStatus: response.status,
+      providerRequestId: this.providerRequestId(response.headers),
+    });
   }
 
   async listCustomers(page = 1, pageSize = 1): Promise<MapleradCustomer[]> {

@@ -2,7 +2,12 @@ import { Request, Response } from 'express';
 import { AppDataSource } from '../database';
 import { KycType, KycVerification } from '../entities/KycVerification';
 import { User } from '../entities/User';
-import { isMapleradProviderError, mapleradErrorToHttpStatus, MapleRadService } from '../services/mapleradService';
+import {
+  isMapleradProviderError,
+  mapleradErrorToApplicationCode,
+  mapleradErrorToHttpStatus,
+  MapleRadService,
+} from '../services/mapleradService';
 import { auditService } from '../services/auditService';
 import { logger } from '../services/logger';
 
@@ -22,18 +27,6 @@ const redactBvn = (bvn: string) => ({
   last4: bvn.slice(-4),
   length: bvn.length,
 });
-
-const sanitizeProviderResponse = (value: any): any => {
-  if (Array.isArray(value)) return value.map(sanitizeProviderResponse);
-  if (!value || typeof value !== 'object') return value;
-
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [
-      key,
-      key.toLowerCase().includes('bvn') ? '[redacted]' : sanitizeProviderResponse(entry),
-    ])
-  );
-};
 
 class KYCController {
   async startVerification(req: Request, res: Response) {
@@ -57,20 +50,21 @@ class KYCController {
     }
 
     try {
-      const providerResponse = await getMapleRadService().verifyBvn(String(bvn));
-      const providerStatus = String(providerResponse?.status || providerResponse?.verification_status || '').toLowerCase();
-      const passed = Boolean(
-        providerResponse?.id ||
-        providerResponse?.bvn ||
-        ['success', 'successful', 'verified', 'valid'].includes(providerStatus)
-      );
+      const providerResult = await getMapleRadService().verifyBvn(String(bvn));
+      const passed = providerResult.verified;
 
       if (!passed) {
         logger.warn('maplerad_bvn_verification_not_confirmed', {
           operation: 'maplerad.identity.verify_bvn',
           userId,
-          providerStatus: providerResponse?.status || providerResponse?.verification_status,
-          providerMessage: providerResponse?.message,
+          providerEnvironment: getMapleRadService().getEnvironment(),
+          providerHttpStatus: providerResult.providerHttpStatus,
+          providerRequestId: providerResult.providerRequestId,
+          providerStatus: providerResult.providerStatus,
+          providerCode: providerResult.providerCode,
+          providerMessage: providerResult.providerMessage,
+          responseKeys: providerResult.responseKeys,
+          dataKeys: providerResult.dataKeys,
         });
       }
 
@@ -82,7 +76,13 @@ class KYCController {
         metadata: {
           provider: 'maplerad',
           bvn: redactBvn(String(bvn)),
-          providerResponse: sanitizeProviderResponse(providerResponse),
+          providerEnvironment: getMapleRadService().getEnvironment(),
+          providerRequestId: providerResult.providerRequestId,
+          providerHttpStatus: providerResult.providerHttpStatus,
+          providerStatus: providerResult.providerStatus,
+          providerCode: providerResult.providerCode,
+          responseKeys: providerResult.responseKeys,
+          dataKeys: providerResult.dataKeys,
         },
       });
       await kycRepo.save(verification);
@@ -102,16 +102,30 @@ class KYCController {
 
       return res.status(200).json({
         message: passed ? 'BVN verification passed.' : 'BVN verification failed.',
+        code: providerResult.applicationCode,
         status: verification.status,
       });
     } catch (error: any) {
       if (isMapleradProviderError(error)) {
+        const code = mapleradErrorToApplicationCode(error);
+        logger.warn('maplerad_bvn_verification_provider_error', {
+          operation: error.operation,
+          userId,
+          providerEnvironment: getMapleRadService().getEnvironment(),
+          providerHttpStatus: error.providerStatus,
+          providerRequestId: error.requestId,
+          providerCode: error.code,
+          providerMessage: error.providerMessage,
+          applicationCode: code,
+        });
+
         return res.status(mapleradErrorToHttpStatus(error)).json({
-          message: 'Unable to verify BVN with Maplerad.',
-          code: error.code,
-          providerStatus: error.providerStatus,
-          providerMessage: error.providerMessage || 'Maplerad rejected the BVN verification request.',
-          requestId: error.requestId,
+          message: code.startsWith('MAPLERAD_')
+            ? 'BVN verification is temporarily unavailable.'
+            : 'Unable to verify BVN with Maplerad.',
+          code,
+          status: code.startsWith('MAPLERAD_') ? 'PROVIDER_ERROR' : 'FAILED',
+          requestId: (req as any).id,
         });
       }
 
