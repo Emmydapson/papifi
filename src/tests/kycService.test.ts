@@ -17,6 +17,7 @@ const verification = (input: Partial<KycVerification>): KycVerification => ({
   confidence: input.confidence as any,
   metadata: input.metadata || {},
   bvnFingerprint: input.bvnFingerprint,
+  attemptOutcome: input.attemptOutcome,
   createdAt: input.createdAt || new Date(),
   updatedAt: input.updatedAt || new Date(),
   user: input.user as any,

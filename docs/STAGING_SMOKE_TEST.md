@@ -46,6 +46,24 @@ Maplerad API keys are not webhook signing secrets. The dashboard may show API se
 
 ## How To Run
 
+Before smoke testing a deployed build, compile and apply database migrations:
+
+```powershell
+npm run build
+npm run migration:show
+npm run migration:run
+pm2 restart papafi-backend --update-env
+```
+
+`GET /ready` returns `schema_not_ready` when TypeORM reports pending migrations. Do not treat a process as deployment-ready until `npm run migration:show` shows no pending migrations.
+
+KYC/BVN behavior:
+
+- Maplerad standalone BVN verification is interpreted as successful only when the HTTP request succeeds, the response body has `status: true`, and `data` is an object.
+- Provider errors such as validation failures, authentication failures, insufficient balance, and outages are returned as safe structured provider errors. They are not stored as proof that the user's BVN is invalid.
+- `GET /api/kyc/status` returns sanitized current KYC summaries only. It does not expose raw provider responses, full BVNs, names, DOBs, phone numbers, base64 identity images, document numbers, upload URLs, or internal notes.
+- `POST /api/wallet/create/{userId}`, `POST /api/wallet/create-usd/{userId}`, and `GET /api/wallet/balance/{userId}` allow normal users to access only their own user ID. Admin and super-admin roles may act on another user's ID.
+
 Against deployed staging:
 
 ```powershell

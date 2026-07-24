@@ -443,6 +443,7 @@ export class MapleRadService {
       userId,
       provider: 'maplerad',
       providerEnvironment: this.environment,
+      referenceType: 'customer',
     };
   }
 
@@ -505,6 +506,8 @@ export class MapleRadService {
         userId: user.id,
         provider: 'maplerad',
         providerEnvironment: 'production',
+        referenceType: 'customer',
+        externalReference: user.mapleradCustomerId,
         providerCustomerId: user.mapleradCustomerId,
         status: 'legacy_imported',
         metadata: { source: 'user.mapleradCustomerId' },
@@ -562,6 +565,8 @@ export class MapleRadService {
         userId: user.id,
         provider: 'maplerad',
         providerEnvironment: this.environment,
+        referenceType: 'customer',
+        externalReference: customerId,
         providerCustomerId: customerId,
         status: 'active',
       });
@@ -604,6 +609,7 @@ export class MapleRadService {
         where: {
           provider: 'maplerad',
           providerEnvironment: this.environment,
+          referenceType: 'customer',
           providerCustomerId: customerId,
         },
       });
@@ -646,8 +652,10 @@ export class MapleRadService {
         userId: user.id,
         provider: 'maplerad',
         providerEnvironment: this.environment,
+        referenceType: 'customer',
       });
       savedReference.providerCustomerId = customerId;
+      savedReference.externalReference = customerId;
       savedReference.status = 'active';
       await repo.save(savedReference);
       await manager.getRepository(AuditLog).save(
@@ -726,22 +734,12 @@ export class MapleRadService {
     ].map((value) => String(value ?? '').trim().toLowerCase());
     const message = String(providerMessage || '').toLowerCase();
 
-    const explicitSuccess = indicators.some((value) =>
-      ['true', 'success', 'successful', 'verified', 'valid', 'completed', 'passed'].includes(value)
-    );
-    const hasIdentityDetails = Boolean(
-      data.id ||
-      data.first_name ||
-      data.last_name ||
-      data.middle_name ||
-      data.name ||
-      data.date_of_birth ||
-      data.dob ||
-      data.phone_number ||
-      data.phone
-    );
-
-    if (explicitSuccess || hasIdentityDetails) {
+    const explicitSuccess = input.providerHttpStatus !== undefined &&
+      input.providerHttpStatus >= 200 &&
+      input.providerHttpStatus < 300 &&
+      rawProviderStatus === true &&
+      data !== envelope;
+    if (explicitSuccess) {
       return {
         verified: true,
         provider: 'maplerad',
@@ -767,7 +765,8 @@ export class MapleRadService {
     }
 
     const explicitNotVerified =
-      indicators.some((value) => ['false', 'failed', 'failure', 'invalid', 'unverified', 'not_found', 'not found'].includes(value)) ||
+      rawProviderStatus === false ||
+      indicators.some((value) => ['failed', 'failure', 'invalid', 'unverified', 'not_found', 'not found'].includes(value)) ||
       message.includes('invalid bvn') ||
       message.includes('bvn not found') ||
       message.includes('not verified') ||
@@ -964,10 +963,12 @@ export class MapleRadService {
         userId: user.id,
         provider: 'maplerad',
         providerEnvironment: this.environment,
+        referenceType: 'customer',
         providerCustomerId: customerId,
         status: 'active',
       });
       savedReference.providerCustomerId = customerId;
+      savedReference.externalReference = customerId;
       savedReference.providerAccountId = data.id || data.account_id;
       savedReference.accountNumber = data.account_number;
       savedReference.bankName = data.bank_name || data.bank?.name;

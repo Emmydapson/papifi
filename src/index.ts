@@ -86,6 +86,10 @@ app.get('/ready', async (req, res) => {
   if (!AppDataSource.isInitialized) return res.status(503).json({ status: 'not_ready' });
   try {
     await AppDataSource.query('SELECT 1');
+    const migrationsPending = await AppDataSource.showMigrations();
+    if (migrationsPending) {
+      return res.status(503).json({ status: 'schema_not_ready', migrationsPending: true });
+    }
     return res.json({ status: 'ready' });
   } catch {
     return res.status(503).json({ status: 'not_ready' });

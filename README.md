@@ -21,6 +21,7 @@ Current Phase 1 KYC behavior:
 - Document OCR and automated document verification are not implemented in Phase 1.
 - `GET /api/kyc/status` returns one sanitized current summary per KYC type. It does not return raw provider responses, full names, date of birth, phone numbers, BVN, document numbers, upload URLs, selfie URLs, or identity images.
 - BVN equality checks use `HMAC_SHA256(BVN_FINGERPRINT_SECRET, normalizedBvn)` so repeated verification of the same already-passed BVN can be idempotent without storing the BVN in plaintext.
+- Maplerad BVN success is accepted only for a successful HTTP response with body `status: true` and a `data` object. Provider validation, authentication, insufficient-balance, malformed-response, and outage errors are returned as safe provider errors instead of failed BVN verification results.
 
 ## Required Environment Variables
 
@@ -242,10 +243,24 @@ Important API requirements:
 ```bash
 npm run build
 npm test
+npm run migration:show
 npm run migration:run
 npm run kyc:sanitize:dry-run
 npm start
 ```
+
+Production deployment order:
+
+```bash
+npm run build
+npm run migration:show
+npm run migration:run
+pm2 restart papafi-backend --update-env
+```
+
+`GET /ready` checks for pending TypeORM migrations and returns `schema_not_ready` until the configured database schema is current.
+
+Wallet user routes keep their existing `:userId` path for compatibility. Normal users may access only their own user ID; `admin` and `super_admin` roles may act on another user.
 
 KYC metadata remediation:
 

@@ -21,6 +21,14 @@ export type KycStatusSummary = {
   attemptCount: number;
 };
 
+export type KycAttemptOutcome =
+  | 'VERIFIED'
+  | 'INVALID_INPUT'
+  | 'PROVIDER_REJECTED'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'CONFIGURATION_ERROR'
+  | 'INSUFFICIENT_PROVIDER_BALANCE';
+
 const bvnTypes = new Set<KycType>(['BVN']);
 
 export const normalizeBvnInput = (input: unknown): NormalizedBvnInput => {
@@ -90,6 +98,13 @@ export const bvnProviderErrorMetadata = (
   providerMessage: input.providerMessage,
   bvn,
 });
+
+export const providerErrorAttemptOutcome = (code: string): KycAttemptOutcome => {
+  if (code === 'MAPLERAD_INSUFFICIENT_BALANCE') return 'INSUFFICIENT_PROVIDER_BALANCE';
+  if (code === 'MAPLERAD_AUTHENTICATION_FAILED' || code === 'MAPLERAD_CONFIGURATION_ERROR') return 'CONFIGURATION_ERROR';
+  if (code === 'MAPLERAD_VALIDATION_ERROR') return 'PROVIDER_REJECTED';
+  return 'PROVIDER_UNAVAILABLE';
+};
 
 const dateOrUndefined = (value: unknown): string | undefined => {
   if (!value) return undefined;

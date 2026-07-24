@@ -93,10 +93,20 @@ const findOwnedWallet = (walletId: string, userId: string) =>
 const findOwnedCard = (cardId: string, userId: string) =>
   cardRepo.findOne({ where: { id: cardId, wallet: { user: { id: userId } } }, relations: ['wallet', 'wallet.user'] });
 
+export const isWalletAdmin = (req: Request) => req.user?.role === 'admin' || req.user?.role === 'super_admin';
+export const requestedUserIdForOwnedRoute = (req: Request) => {
+  const authenticatedUserId = req.user?.id;
+  const requestedUserId = req.params.userId;
+  if (!authenticatedUserId) return { ok: false as const, status: 401, message: 'Authentication required' };
+  if (requestedUserId === authenticatedUserId || isWalletAdmin(req)) return { ok: true as const, userId: requestedUserId };
+  return { ok: false as const, status: 403, message: 'Forbidden' };
+};
+
 router.post('/create/:userId', async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId || req.params.userId !== userId) return res.status(403).json({ ok: false, message: 'Forbidden' });
+    const authorization = requestedUserIdForOwnedRoute(req);
+    if (!authorization.ok) return res.status(authorization.status).json({ ok: false, message: authorization.message });
+    const userId = authorization.userId;
 
     const existing = await walletRepo.findOne({ where: { user: { id: userId }, currency: 'NGN' } });
     if (existing) return res.status(200).json({ ok: true, wallet: existing });
@@ -122,8 +132,9 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
 
 router.post('/create-usd/:userId', async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId || req.params.userId !== userId) return res.status(403).json({ ok: false, message: 'Forbidden' });
+    const authorization = requestedUserIdForOwnedRoute(req);
+    if (!authorization.ok) return res.status(authorization.status).json({ ok: false, message: authorization.message });
+    const userId = authorization.userId;
 
     const usdAccountRequest = await mapleRadService.createUsdVirtualAccount(userId);
     return res.status(201).json({ ok: true, usdAccountRequest });
@@ -144,8 +155,9 @@ router.post('/create-usd/:userId', async (req: Request, res: Response) => {
 
 router.get('/balance/:userId', async (req: Request, res: Response) => {
   try {
-    const userId = req.user?.id;
-    if (!userId || req.params.userId !== userId) return res.status(403).json({ ok: false, message: 'Forbidden' });
+    const authorization = requestedUserIdForOwnedRoute(req);
+    if (!authorization.ok) return res.status(authorization.status).json({ ok: false, message: authorization.message });
+    const userId = authorization.userId;
 
     const wallets = await walletRepo.find({ where: { user: { id: userId } } });
     return res.json({ ok: true, wallets });

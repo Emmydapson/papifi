@@ -18,7 +18,7 @@ function serviceWithMockedRequest(mock: (options: any) => Promise<any>, raw = tr
   if (raw) {
     (service as any).requestMapleradRaw = async (options: any) => {
       const result = await mock(options);
-      if (result?.status && Object.prototype.hasOwnProperty.call(result, 'data')) return result;
+      if (typeof result?.status === 'number' && Object.prototype.hasOwnProperty.call(result, 'data')) return result;
       return { status: 200, data: result, headers: { 'x-request-id': 'req-success' } };
     };
   } else {
@@ -31,7 +31,7 @@ test('verifyBvn sends documented payload and returns success response', async ()
   let observed: any;
   const service = serviceWithMockedRequest(async (options) => {
     observed = options;
-    return { status: 'success', id: 'identity-id', first_name: 'Ada' };
+    return { status: true, message: 'BVN resolved', data: { first_name: 'Ada', last_name: 'Okafor' } };
   }, true);
 
   const result = await service.verifyBvn(' 12345678901 ');
@@ -68,9 +68,9 @@ test('verifyBvn parses nested successful response envelope', async () => {
     status: 200,
     headers: { 'x-request-id': 'req-nested' },
     data: {
-      status: 'success',
+      status: true,
       message: 'BVN verified',
-      data: { first_name: 'Ada', last_name: 'Okafor', verified: true },
+      data: { first_name: 'Ada', last_name: 'Okafor' },
     },
   }), true);
 
@@ -78,7 +78,7 @@ test('verifyBvn parses nested successful response envelope', async () => {
   assert.equal(result.verified, true);
   assert.equal(result.providerRequestId, 'req-nested');
   assert.deepEqual(result.responseKeys, ['data', 'message', 'status']);
-  assert.deepEqual(result.dataKeys, ['first_name', 'last_name', 'verified']);
+  assert.deepEqual(result.dataKeys, ['first_name', 'last_name']);
 });
 
 test('verifyBvn treats Maplerad status true with identity data as successful', async () => {
@@ -384,7 +384,7 @@ test('Tier 1 upgrade is a separate operation from standalone BVN verification', 
   const operations: string[] = [];
   const service = serviceWithMockedRequest(async (options) => {
     operations.push(options.operation);
-    return { status: 'success', id: 'identity-id', first_name: 'Ada' };
+    return { status: true, message: 'BVN resolved', data: { first_name: 'Ada', last_name: 'Okafor' } };
   }, true);
 
   await service.verifyBvn('12345678901');

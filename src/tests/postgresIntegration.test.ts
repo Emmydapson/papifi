@@ -9,6 +9,7 @@ import { LedgerJournal } from '../entities/LedgerJournal';
 import { Transaction } from '../entities/Transaction';
 import { LedgerEntry } from '../entities/LedgerEntry';
 import { AuditLog } from '../entities/AuditLog';
+import { ProviderReference } from '../entities/ProviderReference';
 
 const testDatabaseUrl = process.env.POSTGRES_TEST_DATABASE_URL;
 
@@ -65,6 +66,85 @@ withPostgres('migrations apply cleanly on PostgreSQL', async () => {
   await initDb();
   const migrations = await AppDataSource.showMigrations();
   assert.equal(migrations, false);
+});
+
+withPostgres('provider_reference migration creates required table, columns, and indexes', async () => {
+  await initDb();
+  const table = await AppDataSource.query(`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_name = 'provider_reference'
+  `);
+  const columns = new Set(table.map((row: any) => row.column_name));
+  for (const column of [
+    'id',
+    'userId',
+    'provider',
+    'providerEnvironment',
+    'referenceType',
+    'externalReference',
+    'providerCustomerId',
+    'providerAccountId',
+    'currency',
+  ]) {
+    assert.equal(columns.has(column), true, `${column} column is missing`);
+  }
+
+  const indexes = await AppDataSource.query(`
+    SELECT indexname
+    FROM pg_indexes
+    WHERE tablename = 'provider_reference'
+  `);
+  const indexNames = new Set(indexes.map((row: any) => row.indexname));
+  assert.equal(indexNames.has('IDX_provider_reference_user_env_type'), true);
+  assert.equal(indexNames.has('IDX_provider_reference_customer_env'), true);
+  assert.equal(indexNames.has('IDX_provider_reference_external_env_type'), true);
+});
+
+withPostgres('provider references are unique by provider environment and reference type', async () => {
+  await initDb();
+  const userRepo = AppDataSource.getRepository(User);
+  const referenceRepo = AppDataSource.getRepository(ProviderReference);
+  const user = await userRepo.save(userRepo.create({
+    firstName: 'Provider',
+    lastName: 'Reference',
+    email: 'provider-reference@example.com',
+    phoneNumber: '+2348011111111',
+    gender: 'other',
+    password: 'hashed-password',
+  }));
+
+  await referenceRepo.save(referenceRepo.create({
+    user,
+    userId: user.id,
+    provider: 'maplerad',
+    providerEnvironment: 'sandbox',
+    referenceType: 'customer',
+    externalReference: 'cus_same',
+    providerCustomerId: 'cus_same',
+  }));
+  await referenceRepo.save(referenceRepo.create({
+    user,
+    userId: user.id,
+    provider: 'maplerad',
+    providerEnvironment: 'production',
+    referenceType: 'customer',
+    externalReference: 'cus_same',
+    providerCustomerId: 'cus_same',
+  }));
+
+  await assert.rejects(
+    () => referenceRepo.save(referenceRepo.create({
+      user,
+      userId: user.id,
+      provider: 'maplerad',
+      providerEnvironment: 'sandbox',
+      referenceType: 'customer',
+      externalReference: 'cus_other',
+      providerCustomerId: 'cus_other',
+    })),
+    /duplicate key|unique/i,
+  );
 });
 
 withPostgres('concurrent wallet debits cannot overdraw the same wallet', async () => {

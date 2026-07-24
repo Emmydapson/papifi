@@ -33,6 +33,9 @@ export class KycVerification {
   @Column({ type: 'varchar', nullable: true })
   bvnFingerprint?: string | null;
 
+  @Column({ type: 'varchar', nullable: true })
+  attemptOutcome?: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

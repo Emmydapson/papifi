@@ -3,10 +3,11 @@ import { User } from './User';
 
 export type ProviderEnvironment = 'sandbox' | 'production';
 
-@Index(['userId', 'provider', 'providerEnvironment'], { unique: true })
 @Index(['provider', 'providerEnvironment', 'providerCustomerId'], { unique: true })
 @Index(['userId', 'provider', 'providerEnvironment', 'currency'], { unique: true })
-@Entity()
+@Index(['userId', 'provider', 'providerEnvironment', 'referenceType'], { unique: true })
+@Index(['provider', 'providerEnvironment', 'referenceType', 'externalReference'], { unique: true })
+@Entity('provider_reference')
 export class ProviderReference {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -22,6 +23,12 @@ export class ProviderReference {
 
   @Column()
   providerEnvironment!: ProviderEnvironment;
+
+  @Column({ default: 'customer' })
+  referenceType!: string;
+
+  @Column({ nullable: true })
+  externalReference?: string;
 
   @Column({ nullable: true })
   providerCustomerId?: string;

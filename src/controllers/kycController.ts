@@ -1,11 +1,10 @@
-import { Request, Response } from 'express';
+import { NextFunction, Request, Response } from 'express';
 import { AppDataSource } from '../database';
 import { KycType, KycVerification } from '../entities/KycVerification';
 import { User } from '../entities/User';
 import {
   isMapleradProviderError,
   mapleradErrorToApplicationCode,
-  mapleradErrorToHttpStatus,
   MapleRadService,
 } from '../services/mapleradService';
 import { auditService } from '../services/auditService';
@@ -16,6 +15,7 @@ import {
   bvnProviderErrorMetadata,
   bvnSuccessMetadata,
   normalizeBvnInput,
+  providerErrorAttemptOutcome,
   serializeKycStatus,
 } from '../services/kycService';
 
@@ -43,7 +43,7 @@ class KYCController {
     });
   }
 
-  async verifyBvn(req: Request, res: Response) {
+  async verifyBvn(req: Request, res: Response, next: NextFunction) {
     const userId = req.user?.id;
     const { bvn } = req.body;
 
@@ -99,6 +99,7 @@ class KYCController {
         type: 'BVN',
         status: passed ? 'PASSED' : 'FAILED',
         bvnFingerprint: fingerprint,
+        attemptOutcome: passed ? 'VERIFIED' : 'PROVIDER_REJECTED',
         metadata: {
           ...(passed
             ? bvnSuccessMetadata(normalizedBvn.redacted, providerResult)
@@ -134,6 +135,7 @@ class KYCController {
           type: 'BVN',
           status: 'PENDING',
           bvnFingerprint: normalizedBvn.ok ? bvnFingerprint(normalizedBvn.value) : undefined,
+          attemptOutcome: providerErrorAttemptOutcome(code),
           metadata: bvnProviderErrorMetadata(normalizedBvn.ok ? normalizedBvn.redacted : { last4: '', length: 0 }, {
             providerEnvironment: getMapleRadService().getEnvironment(),
             providerHttpStatus: error.providerStatus,
@@ -154,13 +156,7 @@ class KYCController {
           applicationCode: code,
         });
 
-        return res.status(mapleradErrorToHttpStatus(error)).json({
-          message: 'Unable to verify BVN with Maplerad.',
-          code: error.code,
-          providerStatus: error.providerStatus,
-          providerMessage: error.providerMessage || 'Maplerad could not complete the BVN verification request.',
-          requestId: error.requestId || (req as any).id,
-        });
+        return next(error);
       }
 
       return res.status(502).json({
