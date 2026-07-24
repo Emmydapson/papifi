@@ -76,15 +76,25 @@ export type MapleradApplicationErrorCode =
 
 export type MapleradBvnVerificationResult = {
   verified: boolean;
+  provider: 'maplerad';
+  providerEnvironment: 'sandbox' | 'production';
   applicationCode: 'BVN_VERIFIED' | 'BVN_NOT_VERIFIED';
   providerHttpStatus?: number;
   providerRequestId?: string;
-  providerStatus?: unknown;
+  providerStatus?: boolean;
   providerCode?: unknown;
   providerMessage?: string;
+  identity?: {
+    firstName?: string;
+    middleName?: string;
+    lastName?: string;
+    dateOfBirth?: string;
+    phoneNumber?: string;
+    gender?: string;
+    image?: string;
+  };
   responseKeys: string[];
   dataKeys: string[];
-  data: Record<string, unknown>;
 };
 
 export class MapleradProviderError extends Error {
@@ -701,7 +711,8 @@ export class MapleRadService {
       );
     }
 
-    const providerStatus = data.status ?? data.verification_status ?? envelope.status;
+    const rawProviderStatus = data.status ?? data.verification_status ?? envelope.status;
+    const providerStatus = typeof rawProviderStatus === 'boolean' ? rawProviderStatus : undefined;
     const providerCode = data.code ?? envelope.code;
     const providerMessage = this.providerMessage(data) || this.providerMessage(envelope);
     const indicators = [
@@ -709,7 +720,7 @@ export class MapleRadService {
       data.valid,
       data.is_valid,
       data.is_verified,
-      providerStatus,
+      rawProviderStatus,
       data.status_text,
       data.verification_status,
     ].map((value) => String(value ?? '').trim().toLowerCase());
@@ -733,15 +744,25 @@ export class MapleRadService {
     if (explicitSuccess || hasIdentityDetails) {
       return {
         verified: true,
+        provider: 'maplerad',
+        providerEnvironment: this.environment,
         applicationCode: 'BVN_VERIFIED',
         providerHttpStatus: input.providerHttpStatus,
         providerRequestId: input.providerRequestId,
         providerStatus,
         providerCode,
         providerMessage,
+        identity: {
+          firstName: data.first_name ? String(data.first_name) : undefined,
+          middleName: data.middle_name ? String(data.middle_name) : undefined,
+          lastName: data.last_name ? String(data.last_name) : undefined,
+          dateOfBirth: data.dob || data.date_of_birth ? String(data.dob || data.date_of_birth) : undefined,
+          phoneNumber: data.phone_number || data.phone ? String(data.phone_number || data.phone) : undefined,
+          gender: data.gender ? String(data.gender) : undefined,
+          image: data.image ? String(data.image) : undefined,
+        },
         responseKeys,
         dataKeys,
-        data,
       };
     }
 
@@ -755,6 +776,8 @@ export class MapleRadService {
     if (explicitNotVerified) {
       return {
         verified: false,
+        provider: 'maplerad',
+        providerEnvironment: this.environment,
         applicationCode: 'BVN_NOT_VERIFIED',
         providerHttpStatus: input.providerHttpStatus,
         providerRequestId: input.providerRequestId,
@@ -763,7 +786,6 @@ export class MapleRadService {
         providerMessage,
         responseKeys,
         dataKeys,
-        data,
       };
     }
 

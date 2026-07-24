@@ -81,6 +81,35 @@ test('verifyBvn parses nested successful response envelope', async () => {
   assert.deepEqual(result.dataKeys, ['first_name', 'last_name', 'verified']);
 });
 
+test('verifyBvn treats Maplerad status true with identity data as successful', async () => {
+  const service = serviceWithMockedRequest(async () => ({
+    status: 200,
+    headers: { 'x-request-id': 'req-status-true' },
+    data: {
+      status: true,
+      message: 'BVN resolved',
+      data: {
+        first_name: 'John',
+        middle_name: 'Victoria',
+        last_name: 'Doe',
+        dob: '1994-01-10',
+        phone_number: '08000000000',
+        gender: 'Male',
+        image: 'base64-image-data',
+      },
+    },
+  }), true);
+
+  const result = await service.verifyBvn('12345678901');
+  assert.equal(result.verified, true);
+  assert.equal(result.provider, 'maplerad');
+  assert.equal(result.providerEnvironment, 'sandbox');
+  assert.equal(result.providerStatus, true);
+  assert.equal(result.identity?.firstName, 'John');
+  assert.equal(result.identity?.dateOfBirth, '1994-01-10');
+  assert.equal(result.identity?.image, 'base64-image-data');
+});
+
 test('verifyBvn maps 400 insufficient balance to provider account problem without leaking BVN', async () => {
   const service = serviceWithMockedRequest(async () => {
     throw new MapleradProviderError(

@@ -30,6 +30,9 @@ export class KycVerification {
   @Column({ type: 'jsonb', nullable: true })
   metadata: any;
 
+  @Column({ type: 'varchar', nullable: true })
+  bvnFingerprint?: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

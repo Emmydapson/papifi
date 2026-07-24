@@ -100,6 +100,73 @@ document.components.schemas.ProfileUpdateRequest = {
   },
 };
 
+document.components.schemas.KycResultResponse = {
+  type: 'object',
+  properties: {
+    message: { type: 'string' },
+    code: { type: 'string', example: 'BVN_VERIFIED' },
+    status: { type: 'string', enum: ['PASSED', 'FAILED'] },
+    verificationId: { type: 'string', format: 'uuid' },
+    reused: { type: 'boolean' },
+  },
+};
+
+document.components.schemas.KycStatusResponse = {
+  type: 'object',
+  properties: {
+    userId: { type: 'string', format: 'uuid' },
+    verifications: {
+      type: 'array',
+      items: { $ref: '#/components/schemas/KycVerificationSummary' },
+    },
+  },
+};
+
+document.components.schemas.KycVerificationSummary = {
+  oneOf: [
+    { $ref: '#/components/schemas/KycBvnSummary' },
+    { $ref: '#/components/schemas/KycDocumentSummary' },
+  ],
+};
+delete document.components.schemas.KycVerification;
+
+document.components.schemas.KycBvnSummary = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    type: { type: 'string', enum: ['BVN'] },
+    status: { type: 'string', enum: ['PENDING', 'PASSED', 'FAILED'] },
+    provider: { type: 'string', example: 'maplerad' },
+    providerEnvironment: { type: 'string', enum: ['sandbox', 'production'] },
+    providerRequestId: { type: 'string' },
+    bvn: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        last4: { type: 'string', example: '7891' },
+      },
+    },
+    createdAt: { type: 'string', format: 'date-time' },
+    verifiedAt: { type: 'string', format: 'date-time' },
+    attemptCount: { type: 'integer', minimum: 1 },
+  },
+};
+
+document.components.schemas.KycDocumentSummary = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    type: { type: 'string', enum: ['NIN', 'DRIVERS_LICENSE', 'INTERNATIONAL_PASSPORT', 'VOTERS_CARD'] },
+    status: { type: 'string', enum: ['PENDING', 'PASSED', 'FAILED'] },
+    issuedCountry: { type: 'string', example: 'NG' },
+    expiresAt: { type: 'string', format: 'date' },
+    createdAt: { type: 'string', format: 'date-time' },
+    attemptCount: { type: 'integer', minimum: 1 },
+  },
+};
+
 const serializedDocument = `${JSON.stringify(document, null, 2)}\n`;
 fs.writeFileSync(jsonPath, serializedDocument);
 fs.writeFileSync(yamlPath, YAML.stringify(document, 10, 2));

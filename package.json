@@ -10,6 +10,8 @@
     "start": "node dist/index.js",
     "maplerad:readiness": "ts-node scripts/maplerad-live-readiness.ts",
     "maplerad:reconcile-customer": "ts-node scripts/reconcile-maplerad-customer.ts",
+    "kyc:sanitize:dry-run": "ts-node scripts/sanitize-kyc-metadata.ts",
+    "kyc:sanitize": "ts-node scripts/sanitize-kyc-metadata.ts --write",
     "smoke:staging": "ts-node scripts/staging-smoke-test.ts",
     "clean": "tsc --build --clean",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",

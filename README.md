@@ -19,6 +19,8 @@ Current Phase 1 KYC behavior:
 - BVN verification is performed through Maplerad.
 - Document metadata/uploads can be collected for NIN, driver's license, international passport, and voter's card.
 - Document OCR and automated document verification are not implemented in Phase 1.
+- `GET /api/kyc/status` returns one sanitized current summary per KYC type. It does not return raw provider responses, full names, date of birth, phone numbers, BVN, document numbers, upload URLs, selfie URLs, or identity images.
+- BVN equality checks use `HMAC_SHA256(BVN_FINGERPRINT_SECRET, normalizedBvn)` so repeated verification of the same already-passed BVN can be idempotent without storing the BVN in plaintext.
 
 ## Required Environment Variables
 
@@ -36,6 +38,7 @@ Important production requirements:
 - `MAPLERAD_SANDBOX_SECRET_KEY` for sandbox, or `MAPLERAD_PRODUCTION_SECRET_KEY` for production
 - `MAPLERAD_WEBHOOK_VERIFICATION_MODE` (`signature`, `ip_and_requery`, or `disabled`)
 - `MAPLERAD_SANDBOX_WEBHOOK_SECRET` for sandbox, or `MAPLERAD_PRODUCTION_WEBHOOK_SECRET` for production, only when Maplerad provides the endpoint signing secret
+- `BVN_FINGERPRINT_SECRET` with at least 32 random characters. It is required in production and must not be logged or shared.
 - `CORS_ALLOWED_ORIGINS`
 
 Do not commit `.env`, private keys, PEM files, or provider credentials.
@@ -240,8 +243,18 @@ Important API requirements:
 npm run build
 npm test
 npm run migration:run
+npm run kyc:sanitize:dry-run
 npm start
 ```
+
+KYC metadata remediation:
+
+```bash
+npm run kyc:sanitize:dry-run
+npm run kyc:sanitize
+```
+
+The dry-run reports counts and suspicious historical `FAILED` KYC IDs only. The write command transactionally removes raw KYC provider/document metadata and is safe to run more than once. It does not change historical verification statuses.
 
 Migration inspection:
 

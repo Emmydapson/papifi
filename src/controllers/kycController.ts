@@ -10,6 +10,14 @@ import {
 } from '../services/mapleradService';
 import { auditService } from '../services/auditService';
 import { logger } from '../services/logger';
+import {
+  bvnFailureMetadata,
+  bvnFingerprint,
+  bvnProviderErrorMetadata,
+  bvnSuccessMetadata,
+  normalizeBvnInput,
+  serializeKycStatus,
+} from '../services/kycService';
 
 let mapleRadServiceInstance: MapleRadService | undefined;
 const getMapleRadService = () => (mapleRadServiceInstance ??= new MapleRadService());
@@ -22,11 +30,6 @@ const documentTypes: KycType[] = [
   'INTERNATIONAL_PASSPORT',
   'VOTERS_CARD',
 ];
-
-const redactBvn = (bvn: string) => ({
-  last4: bvn.slice(-4),
-  length: bvn.length,
-});
 
 class KYCController {
   async startVerification(req: Request, res: Response) {
@@ -45,19 +48,41 @@ class KYCController {
     const { bvn } = req.body;
 
     if (!userId) return res.status(401).json({ message: 'Unauthorized. User not authenticated.' });
-    if (!bvn || !/^\d{11}$/.test(String(bvn))) {
-      return res.status(400).json({ message: 'A valid 11-digit BVN is required.' });
+    const normalizedBvn = normalizeBvnInput(bvn);
+    if (!normalizedBvn.ok) {
+      return res.status(400).json({ message: normalizedBvn.message });
     }
 
     try {
-      const providerResult = await getMapleRadService().verifyBvn(String(bvn));
+      const fingerprint = bvnFingerprint(normalizedBvn.value);
+      const existingPassed = await kycRepo.findOne({
+        where: {
+          userId,
+          type: 'BVN',
+          status: 'PASSED',
+          bvnFingerprint: fingerprint,
+        },
+        order: { createdAt: 'DESC' },
+      });
+      if (existingPassed) {
+        return res.status(200).json({
+          message: 'BVN verification passed.',
+          code: 'BVN_VERIFIED',
+          status: 'PASSED',
+          verificationId: existingPassed.id,
+          reused: true,
+        });
+      }
+
+      const service = getMapleRadService();
+      const providerResult = await service.verifyBvn(normalizedBvn.value);
       const passed = providerResult.verified;
 
       if (!passed) {
         logger.warn('maplerad_bvn_verification_not_confirmed', {
           operation: 'maplerad.identity.verify_bvn',
           userId,
-          providerEnvironment: getMapleRadService().getEnvironment(),
+          providerEnvironment: providerResult.providerEnvironment,
           providerHttpStatus: providerResult.providerHttpStatus,
           providerRequestId: providerResult.providerRequestId,
           providerStatus: providerResult.providerStatus,
@@ -73,16 +98,11 @@ class KYCController {
         userId,
         type: 'BVN',
         status: passed ? 'PASSED' : 'FAILED',
+        bvnFingerprint: fingerprint,
         metadata: {
-          provider: 'maplerad',
-          bvn: redactBvn(String(bvn)),
-          providerEnvironment: getMapleRadService().getEnvironment(),
-          providerRequestId: providerResult.providerRequestId,
-          providerHttpStatus: providerResult.providerHttpStatus,
-          providerStatus: providerResult.providerStatus,
-          providerCode: providerResult.providerCode,
-          responseKeys: providerResult.responseKeys,
-          dataKeys: providerResult.dataKeys,
+          ...(passed
+            ? bvnSuccessMetadata(normalizedBvn.redacted, providerResult)
+            : bvnFailureMetadata(normalizedBvn.redacted, providerResult)),
         },
       });
       await kycRepo.save(verification);
@@ -108,6 +128,21 @@ class KYCController {
     } catch (error: any) {
       if (isMapleradProviderError(error)) {
         const code = mapleradErrorToApplicationCode(error);
+        const safeAttempt = kycRepo.create({
+          user: { id: userId } as User,
+          userId,
+          type: 'BVN',
+          status: 'PENDING',
+          bvnFingerprint: normalizedBvn.ok ? bvnFingerprint(normalizedBvn.value) : undefined,
+          metadata: bvnProviderErrorMetadata(normalizedBvn.ok ? normalizedBvn.redacted : { last4: '', length: 0 }, {
+            providerEnvironment: getMapleRadService().getEnvironment(),
+            providerHttpStatus: error.providerStatus,
+            providerRequestId: error.requestId,
+            providerErrorCode: error.code,
+            providerMessage: error.providerMessage,
+          }),
+        });
+        await kycRepo.save(safeAttempt);
         logger.warn('maplerad_bvn_verification_provider_error', {
           operation: error.operation,
           userId,
@@ -120,12 +155,11 @@ class KYCController {
         });
 
         return res.status(mapleradErrorToHttpStatus(error)).json({
-          message: code.startsWith('MAPLERAD_')
-            ? 'BVN verification is temporarily unavailable.'
-            : 'Unable to verify BVN with Maplerad.',
-          code,
-          status: code.startsWith('MAPLERAD_') ? 'PROVIDER_ERROR' : 'FAILED',
-          requestId: (req as any).id,
+          message: 'Unable to verify BVN with Maplerad.',
+          code: error.code,
+          providerStatus: error.providerStatus,
+          providerMessage: error.providerMessage || 'Maplerad could not complete the BVN verification request.',
+          requestId: error.requestId || (req as any).id,
         });
       }
 
@@ -193,14 +227,7 @@ class KYCController {
     });
 
     return res.status(200).json({
-      userId,
-      verifications: verifications.map((verification) => ({
-        id: verification.id,
-        type: verification.type,
-        status: verification.status,
-        metadata: verification.metadata,
-        createdAt: verification.createdAt,
-      })),
+      ...serializeKycStatus(userId, verifications),
     });
   }
 }
