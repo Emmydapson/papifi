@@ -10,6 +10,8 @@ import { Transaction } from '../entities/Transaction';
 import { LedgerEntry } from '../entities/LedgerEntry';
 import { AuditLog } from '../entities/AuditLog';
 import { ProviderReference } from '../entities/ProviderReference';
+import { KycVerification } from '../entities/KycVerification';
+import { KycAttemptOutcome1766589200000 } from '../migrations/1766589200000-KycAttemptOutcome';
 
 const testDatabaseUrl = process.env.POSTGRES_TEST_DATABASE_URL;
 
@@ -99,6 +101,52 @@ withPostgres('provider_reference migration creates required table, columns, and 
   assert.equal(indexNames.has('IDX_provider_reference_user_env_type'), true);
   assert.equal(indexNames.has('IDX_provider_reference_customer_env'), true);
   assert.equal(indexNames.has('IDX_provider_reference_external_env_type'), true);
+});
+
+withPostgres('kyc attemptOutcome migration is idempotent and preserves existing rows', async () => {
+  await initDb();
+  const columns = await AppDataSource.query(`
+    SELECT column_name, data_type, is_nullable
+    FROM information_schema.columns
+    WHERE table_name = 'kyc_verifications'
+      AND column_name = 'attemptOutcome'
+  `);
+  assert.equal(columns.length, 1);
+  assert.equal(columns[0].data_type, 'character varying');
+  assert.equal(columns[0].is_nullable, 'YES');
+
+  const userRepo = AppDataSource.getRepository(User);
+  const kycRepo = AppDataSource.getRepository(KycVerification);
+  const user = await userRepo.save(userRepo.create({
+    firstName: 'Kyc',
+    lastName: 'Attempt',
+    email: 'kyc-attempt-outcome@example.com',
+    phoneNumber: '+2348022222222',
+    gender: 'other',
+    password: 'hashed-password',
+  }));
+  const verification = await kycRepo.save(kycRepo.create({
+    user,
+    userId: user.id,
+    type: 'BVN',
+    status: 'PENDING',
+    bvnFingerprint: 'existing-fingerprint',
+  }));
+
+  const migration = new KycAttemptOutcome1766589200000();
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  try {
+    await migration.up(queryRunner);
+    await migration.up(queryRunner);
+  } finally {
+    await queryRunner.release();
+  }
+
+  const preserved = await kycRepo.findOneByOrFail({ id: verification.id });
+  assert.equal(preserved.userId, user.id);
+  assert.equal(preserved.bvnFingerprint, 'existing-fingerprint');
+  assert.equal(preserved.attemptOutcome, null);
 });
 
 withPostgres('provider references are unique by provider environment and reference type', async () => {

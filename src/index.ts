@@ -19,6 +19,7 @@ import { logger } from './services/logger';
 import { startReconciliationWorker } from './workers/reconciliationWorker';
 import { registerApiDocs } from './apiDocs';
 import { mapleradStartupSummary } from './config/maplerad';
+import { getSchemaReadiness } from './services/schemaReadiness';
 
 
 
@@ -89,6 +90,14 @@ app.get('/ready', async (req, res) => {
     const migrationsPending = await AppDataSource.showMigrations();
     if (migrationsPending) {
       return res.status(503).json({ status: 'schema_not_ready', migrationsPending: true });
+    }
+    const schemaReadiness = await getSchemaReadiness(AppDataSource);
+    if (!schemaReadiness.ready) {
+      return res.status(503).json({
+        status: 'schema_not_ready',
+        migrationsPending: false,
+        missingColumns: schemaReadiness.missingColumns,
+      });
     }
     return res.json({ status: 'ready' });
   } catch {
