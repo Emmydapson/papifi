@@ -11,7 +11,17 @@
   "/api/auth/reset-passwordOtp": { "email": "ada.okafor@operator-controlled-domain.tld", "otp": "000000" },
   "/api/profile": { "gender": "female", "phoneNumber": "+2348012345678", "country": "NG", "nationality": "Nigerian", "dateOfBirth": "1995-04-12", "address": "12 Example Road, Lagos" },
   "/api/profile/change-password": { "currentPassword": "DOCS_ONLY_CURRENT_PASSWORD", "newPassword": "DOCS_ONLY_NEW_PASSWORD" },
-  "/api/kyc/bvn": { "bvn": "00000000000" },
+  "/api/kyc/bvn": {
+    "bvn": "00000000000",
+    "dateOfBirth": "1995-04-12",
+    "address": {
+      "street": "12 Example Road",
+      "city": "Ikeja",
+      "state": "Lagos",
+      "country": "NG",
+      "postal_code": "100001"
+    }
+  },
   "/api/kyc/documents": { "documentType": "INTERNATIONAL_PASSPORT", "documentNumber": "DOCS-ONLY-PASSPORT", "frontImageUrl": "https://example.com/uploads/passport-front.jpg", "selfieImageUrl": "https://example.com/uploads/selfie.jpg", "issuedCountry": "NG", "expiresAt": "2030-12-31" },
   "/api/wallet/webhook": { "id": "evt_docs_01", "event": "collection.successful", "data": { "reference": "deposit_docs_01", "customer_id": "customer_docs_01", "amount": 500000, "currency": "NGN", "status": "success" } },
   "/api/wallet/withdraw": { "amount": 5000, "currency": "NGN", "bankCode": "000013", "accountNumber": "0000000000", "accountName": "Ada Okafor", "description": "Wallet withdrawal", "transactionPin": "0000" },

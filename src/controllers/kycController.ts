@@ -65,6 +65,22 @@ class KYCController {
         order: { createdAt: 'DESC' },
       });
       if (existingPassed) {
+        await getMapleRadService().ensureCustomerTier1ForBvn(
+          userId,
+          {
+            bvn: normalizedBvn.value,
+            dateOfBirth: req.body.dateOfBirth,
+            phoneNumber: req.body.phoneNumber,
+            address: req.body.address,
+            city: req.body.city,
+            state: req.body.state,
+            country: req.body.country,
+            postalCode: req.body.postalCode,
+            postal_code: req.body.postal_code,
+            photo: req.body.photo,
+          }
+        );
+        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'APPROVED' });
         return res.status(200).json({
           message: 'BVN verification passed.',
           code: 'BVN_VERIFIED',
@@ -106,11 +122,31 @@ class KYCController {
             : bvnFailureMetadata(normalizedBvn.redacted, providerResult)),
         },
       });
-      await kycRepo.save(verification);
-
       if (passed) {
-        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'BVN_VERIFIED' });
+        const tier1Result = await service.ensureCustomerTier1ForBvn(
+          userId,
+          {
+            bvn: normalizedBvn.value,
+            dateOfBirth: req.body.dateOfBirth,
+            phoneNumber: req.body.phoneNumber,
+            address: req.body.address,
+            city: req.body.city,
+            state: req.body.state,
+            country: req.body.country,
+            postalCode: req.body.postalCode,
+            postal_code: req.body.postal_code,
+            photo: req.body.photo,
+          },
+          providerResult.identity
+        );
+        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'APPROVED' });
+        verification.metadata = {
+          ...(verification.metadata || {}),
+          mapleradCustomerId: tier1Result.customerId,
+          mapleradCustomerTier1: tier1Result.tier1,
+        };
       }
+      await kycRepo.save(verification);
       await auditService.log({
         actorUserId: userId,
         targetUserId: userId,

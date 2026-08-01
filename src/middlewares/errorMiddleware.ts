@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../services/logger';
-import { isMapleradProviderError, mapleradErrorToHttpStatus } from '../services/mapleradService';
+import { isMapleradProviderError, mapleradErrorToApplicationCode, mapleradErrorToHttpStatus } from '../services/mapleradService';
 
 export const notFoundHandler = (req: Request, res: Response) => {
   res.status(404).json({ message: 'Route not found' });
@@ -21,9 +21,16 @@ export const errorHandler = (err: Error, req: Request, res: Response, next: Next
       providerRequestId: err.requestId,
       code: err.code,
     });
+    const code = mapleradErrorToApplicationCode(err);
     return res.status(mapleradErrorToHttpStatus(err)).json({
-      message: 'Unable to verify BVN with Maplerad.',
-      code: err.code,
+      ok: false,
+      message:
+        code === 'CUSTOMER_NOT_TIER1'
+          ? 'Customer must complete Tier 1 KYC before a NGN virtual account can be created.'
+          : err.providerMessage === 'missing tier 1 kyc fields'
+            ? 'Date of birth, Nigerian phone number, and structured address are required to complete Tier 1 KYC.'
+            : 'Unable to complete KYC with Maplerad.',
+      code,
       providerStatus: err.providerStatus,
       providerMessage: err.providerMessage || 'Maplerad could not complete the request.',
       requestId: err.requestId || (req as any).id,

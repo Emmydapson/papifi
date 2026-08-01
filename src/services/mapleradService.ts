@@ -5,6 +5,7 @@ import { EntityManager } from 'typeorm';
 import { AppDataSource } from '../database';
 import { User } from '../entities/User';
 import { Currency, Wallet } from '../entities/Wallet';
+import { Profile } from '../entities/profile';
 import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
 import { AuditLog } from '../entities/AuditLog';
@@ -26,6 +27,9 @@ type MapleradCustomer = {
   email?: string;
   country?: string;
   tier?: string;
+  level?: string | number;
+  account_tier?: string | number;
+  customer_tier?: string | number;
   phone?: unknown;
 };
 
@@ -62,6 +66,7 @@ export type MapleradProviderErrorCode =
   | 'SCHEMA';
 
 export type MapleradApplicationErrorCode =
+  | 'CUSTOMER_NOT_TIER1'
   | 'BVN_NOT_VERIFIED'
   | 'BVN_INVALID'
   | 'BVN_IDENTITY_MISMATCH'
@@ -117,6 +122,7 @@ export const isMapleradProviderError = (error: unknown): error is MapleradProvid
 
 export const mapleradErrorToHttpStatus = (error: unknown) => {
   if (!isMapleradProviderError(error)) return 502;
+  if (mapleradErrorToApplicationCode(error) === 'CUSTOMER_NOT_TIER1') return 400;
   if (error.code === 'VALIDATION') return error.providerStatus === 422 ? 422 : 400;
   if (error.code === 'AUTH') return 502;
   if (error.code === 'NOT_FOUND') return 400;
@@ -129,6 +135,14 @@ export const mapleradErrorToHttpStatus = (error: unknown) => {
 export const mapleradErrorToApplicationCode = (error: unknown): MapleradApplicationErrorCode => {
   if (!isMapleradProviderError(error)) return 'MAPLERAD_UNAVAILABLE';
   const message = String(error.providerMessage || '').toLowerCase();
+  if (
+    message.includes('tier 1') ||
+    message.includes('tier1') ||
+    message.includes('customer must complete tier 1') ||
+    message.includes('service is only available for tier')
+  ) {
+    return 'CUSTOMER_NOT_TIER1';
+  }
   if (error.code === 'ACCOUNT' || message.includes('insufficient balance')) return 'MAPLERAD_INSUFFICIENT_BALANCE';
   if (error.code === 'AUTH') {
     return error.providerStatus === 403 ? 'MAPLERAD_CONFIGURATION_ERROR' : 'MAPLERAD_AUTHENTICATION_FAILED';
@@ -137,6 +151,21 @@ export const mapleradErrorToApplicationCode = (error: unknown): MapleradApplicat
   if (error.code === 'RATE_LIMIT') return 'MAPLERAD_RATE_LIMITED';
   if (error.code === 'SCHEMA') return 'MAPLERAD_CONTRACT_ERROR';
   return 'MAPLERAD_UNAVAILABLE';
+};
+
+export const mapleradErrorToClientResponse = (error: MapleradProviderError) => {
+  const code = mapleradErrorToApplicationCode(error);
+  return {
+    ok: false,
+    code,
+    message:
+      code === 'CUSTOMER_NOT_TIER1'
+        ? 'Customer must complete Tier 1 KYC before a NGN virtual account can be created.'
+        : error.message,
+    providerStatus: error.providerStatus,
+    providerMessage: error.providerMessage,
+    requestId: error.requestId,
+  };
 };
 
 type MapleradTransfer = {
@@ -161,6 +190,29 @@ type MapleradWebhookHeaders = {
   svixId?: string;
   svixTimestamp?: string;
   svixSignature?: string;
+};
+
+type Tier1AddressInput = {
+  street?: string;
+  street2?: string | null;
+  city?: string;
+  state?: string;
+  country?: string;
+  postal_code?: string;
+  postalCode?: string;
+};
+
+type Tier1UpgradeInput = {
+  bvn: string;
+  dateOfBirth?: string;
+  phoneNumber?: string;
+  address?: string | Tier1AddressInput;
+  city?: string;
+  state?: string;
+  country?: string;
+  postalCode?: string;
+  postal_code?: string;
+  photo?: string;
 };
 
 export type MapleradWebhookVerificationResult =
@@ -312,6 +364,7 @@ export class MapleRadService {
           normalized.includes('token') ||
           normalized.includes('secret') ||
           normalized.includes('bvn') ||
+          normalized.includes('identification_number') ||
           normalized.includes('pan') ||
           normalized.includes('card_number') ||
           normalized.includes('cardnumber') ||
@@ -816,6 +869,147 @@ export class MapleRadService {
     return undefined;
   }
 
+  private normalizeDateOfBirthForTier1(value?: string | null) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return undefined;
+    const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+    if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+    if (/^\d{2}-\d{2}-\d{4}$/.test(trimmed)) return trimmed;
+    return undefined;
+  }
+
+  private splitNigerianPhone(value?: string | null) {
+    const normalized = this.normalizeNigerianPhone(value);
+    if (!normalized) return undefined;
+    return {
+      phone_country_code: '+234',
+      phone_number: normalized.replace(/^\+234/, ''),
+    };
+  }
+
+  private normalizeTier1Address(input?: string | Tier1AddressInput, fallback?: Partial<Tier1AddressInput>) {
+    const objectInput = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    const street = typeof input === 'string' ? input : objectInput.street;
+    const address = {
+      street: String(street || fallback?.street || '').trim(),
+      street2: objectInput.street2 ?? null,
+      city: String(objectInput.city || fallback?.city || '').trim(),
+      state: String(objectInput.state || fallback?.state || '').trim(),
+      country: String(objectInput.country || fallback?.country || 'NG').trim().toUpperCase(),
+      postal_code: String(objectInput.postal_code || objectInput.postalCode || fallback?.postal_code || fallback?.postalCode || '').trim(),
+    };
+    return address.street && address.city && address.state && address.country && address.postal_code ? address : undefined;
+  }
+
+  private isTier1OrHigher(customer: MapleradCustomer) {
+    const candidates = [customer.tier, customer.level, customer.account_tier, customer.customer_tier];
+    return candidates.some((value) => {
+      if (typeof value === 'number') return value >= 1;
+      const normalized = String(value || '').trim().toLowerCase();
+      return ['1', 'one', 'tier_1', 'tier1', 'tier 1', 'level_1', 'level1', 'level 1'].includes(normalized);
+    });
+  }
+
+  private customerTierSnapshot(customer: MapleradCustomer) {
+    return {
+      tier: customer.tier,
+      level: customer.level,
+      account_tier: customer.account_tier,
+      customer_tier: customer.customer_tier,
+    };
+  }
+
+  async ensureCustomerTier1ForBvn(userId: string, input: Tier1UpgradeInput, identity?: MapleradBvnVerificationResult['identity']) {
+    return AppDataSource.transaction(async (manager) => {
+      const user = await this.lockUser(manager, userId);
+      if (!user) throw new Error('User not found');
+      const profile = await manager.getRepository(Profile).findOne({ where: { user: { id: user.id } } });
+      const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
+      const beforeUpgrade = await this.getCustomerById(customerId);
+      if (this.isTier1OrHigher(beforeUpgrade)) {
+        await this.updateCustomerTierReference(manager, user, customerId, beforeUpgrade, 'tier1_confirmed');
+        return { customerId, customer: beforeUpgrade, upgraded: false, tier1: true };
+      }
+
+      const dob = this.normalizeDateOfBirthForTier1(input.dateOfBirth || profile?.dateOfBirth || identity?.dateOfBirth);
+      const phone = this.splitNigerianPhone(input.phoneNumber || identity?.phoneNumber || profile?.phoneNumber || user.phoneNumber);
+      const address = this.normalizeTier1Address(input.address || profile?.address, {
+        city: input.city,
+        state: input.state,
+        country: input.country || profile?.country || 'NG',
+        postal_code: input.postalCode || input.postal_code,
+      });
+
+      if (!dob || !phone || !address) {
+        throw new MapleradProviderError(
+          'Tier 1 upgrade requires dateOfBirth, Nigerian phone number, and structured address fields.',
+          'maplerad.customer.upgrade_tier1.prepare',
+          400,
+          'missing tier 1 kyc fields',
+          undefined,
+          { missing: { dob: !dob, phone: !phone, address: !address } },
+          'VALIDATION'
+        );
+      }
+
+      await this.upgradeCustomerTier1({
+        customer_id: customerId,
+        dob,
+        identification_number: input.bvn,
+        phone,
+        address,
+        ...(input.photo ? { photo: input.photo } : {}),
+      });
+
+      const upgradedCustomer = await this.getCustomerById(customerId);
+      const tier1 = this.isTier1OrHigher(upgradedCustomer);
+      await this.updateCustomerTierReference(manager, user, customerId, upgradedCustomer, tier1 ? 'tier1_confirmed' : 'tier1_unconfirmed');
+
+      if (!tier1) {
+        throw new MapleradProviderError(
+          'Maplerad customer is not Tier 1 after BVN upgrade.',
+          'maplerad.customer.retrieve_after_tier1_upgrade',
+          400,
+          'customer is not Tier 1 after upgrade',
+          undefined,
+          this.customerTierSnapshot(upgradedCustomer),
+          'VALIDATION'
+        );
+      }
+
+      return { customerId, customer: upgradedCustomer, upgraded: true, tier1 };
+    });
+  }
+
+  private async updateCustomerTierReference(
+    manager: EntityManager,
+    user: User,
+    customerId: string,
+    customer: MapleradCustomer,
+    status: string
+  ) {
+    const repo = manager.getRepository(ProviderReference);
+    const reference = await repo.findOne({ where: this.providerReferenceWhere(user.id) });
+    const savedReference = reference || repo.create({
+      user,
+      userId: user.id,
+      provider: 'maplerad',
+      providerEnvironment: this.environment,
+      referenceType: 'customer',
+      providerCustomerId: customerId,
+      externalReference: customerId,
+    });
+    savedReference.providerCustomerId = customerId;
+    savedReference.externalReference = customerId;
+    savedReference.status = status;
+    savedReference.metadata = {
+      ...(savedReference.metadata || {}),
+      customerTier: this.customerTierSnapshot(customer),
+      tier1VerifiedAt: status === 'tier1_confirmed' ? new Date().toISOString() : savedReference.metadata?.tier1VerifiedAt,
+    };
+    await repo.save(savedReference);
+  }
+
   async verifyBvn(bvn: string): Promise<MapleradBvnVerificationResult> {
     const normalizedBvn = String(bvn).trim();
     if (!/^\d{11}$/.test(normalizedBvn)) {
@@ -912,6 +1106,19 @@ export class MapleRadService {
       if (existingWallet?.accountNumber && existingWallet?.mapleradAccountId && reference?.providerAccountId) return existingWallet;
 
       const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
+      const customer = await this.getCustomerById(customerId);
+      if (!this.isTier1OrHigher(customer)) {
+        await this.updateCustomerTierReference(manager, user, customerId, customer, 'tier1_required');
+        throw new MapleradProviderError(
+          'Customer must complete Tier 1 KYC before a NGN virtual account can be created.',
+          'maplerad.virtual_account.preflight_tier1',
+          400,
+          'service is only available for Tier 1 customers',
+          undefined,
+          this.customerTierSnapshot(customer),
+          'VALIDATION'
+        );
+      }
       reference = await referenceRepo.findOne({ where: this.providerReferenceWhere(user.id) });
       if (reference?.providerAccountId && reference.accountNumber) {
         const wallet = this.applyVirtualAccountToWallet(

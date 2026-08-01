@@ -52,7 +52,7 @@ All sensitive-looking values below are documentation-only placeholders. Replace 
 {
   "POST /api/auth/make-admin": { "userId": "11111111-1111-4111-8111-111111111111" },
   "POST /api/auth/remove-admin": { "userId": "11111111-1111-4111-8111-111111111111" },
-  "POST /api/kyc/bvn": { "bvn": "00000000000" },
+  "POST /api/kyc/bvn": { "bvn": "00000000000", "dateOfBirth": "1995-04-12", "address": { "street": "12 Example Road", "city": "Ikeja", "state": "Lagos", "country": "NG", "postal_code": "100001" } },
   "POST /api/kyc/documents": { "documentType": "INTERNATIONAL_PASSPORT", "documentNumber": "DOCS-ONLY-PASSPORT", "frontImageUrl": "https://example.com/uploads/passport-front.jpg", "selfieImageUrl": "https://example.com/uploads/selfie.jpg", "issuedCountry": "NG", "expiresAt": "2030-12-31" },
   "POST /api/admin/transactions/{id}/manual-review": { "notes": "Provider status requires manual review." }
 }
@@ -111,7 +111,7 @@ Money movement success responses usually include `ok: true`, a `transaction`, an
 1. Register with `POST /api/auth/register`.
 2. User receives an email OTP.
 3. Verify with `POST /api/auth/verify-otp`.
-4. Store the returned JWT securely.
+4. Store the returned JWT and `userId` securely for authenticated flows.
 5. Create transaction PIN with `POST /api/auth/create-pin`.
 6. Use `POST /api/auth/login` for later sessions.
 
@@ -120,7 +120,7 @@ Money movement success responses usually include `ok: true`, a `transaction`, an
 | Method | Path | Auth | Body | Success |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/auth/register` | No | `firstName`, `lastName`, `email`, `password`, `gender`, `phoneNumber` | `{ "message": "OTP sent to your email. Please verify to complete registration." }` |
-| `POST` | `/api/auth/verify-otp` | No | `email`, `otp` | `{ "token": "<jwt>", "message": "Account verified. Please create your transaction PIN." }` |
+| `POST` | `/api/auth/verify-otp` | No | `email`, `otp` | `{ "token": "<jwt>", "userId": "<uuid>", "message": "Account verified. Please create your transaction PIN." }` |
 | `POST` | `/api/auth/login` | No | `email`, `password` | `{ "token": "<jwt>", "userId": "<uuid>", "message": "Login successful. Welcome back!" }` |
 | `POST` | `/api/auth/resend-otp` | No | `email` | Message response |
 | `POST` | `/api/auth/create-pin` | Bearer | `pin` as 4 digits | `{ "message": "Transaction PIN set successfully." }` |
@@ -168,31 +168,44 @@ The service rejects updates to `email`, `firstName`, and `lastName`.
 
 ## KYC Flow
 
-Papafi currently supports Maplerad BVN verification plus document metadata collection.
+Papafi currently supports Maplerad BVN verification, Maplerad Tier 1 customer upgrade, and document metadata collection.
 
 1. Call `POST /api/kyc/start` to retrieve provider and supported document types.
-2. Collect BVN and call `POST /api/kyc/bvn`.
+2. Collect BVN and call `POST /api/kyc/bvn`. Include structured home address fields when the profile only has a single address string.
 3. If document collection is required, upload images to the client-approved storage flow and send metadata URLs to `POST /api/kyc/documents`.
 4. Poll or refresh with `GET /api/kyc/status`.
 
 | Method | Path | Auth | Body | Success |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/kyc/start` | Bearer | None | Returns provider `maplerad` and document types. |
-| `POST` | `/api/kyc/bvn` | Bearer | `bvn` as 11 digits | `{ "message": "BVN verification passed.", "status": "PASSED" }` or failed status. |
+| `POST` | `/api/kyc/bvn` | Bearer | `bvn` as 11 digits; optional `dateOfBirth`, `phoneNumber`, `address` object, `city`, `state`, `country`, `postalCode`, `photo` for Tier 1 upgrade | `{ "message": "BVN verification passed.", "status": "PASSED" }` or failed status. |
 | `POST` | `/api/kyc/documents` | Bearer | `documentType`, optional `documentNumber`, `frontImageUrl`, `backImageUrl`, `selfieImageUrl`, `issuedCountry`, `expiresAt` | `{ "message": "KYC document metadata submitted.", "verificationId": "<uuid>", "status": "PENDING" }` |
 | `GET` | `/api/kyc/status` | Bearer | None | Returns user KYC verification records. |
 
-Supported document types are `NIN`, `DRIVERS_LICENSE`, `INTERNATIONAL_PASSPORT`, and `VOTERS_CARD`. BVN is redacted server-side in stored metadata; clients must still avoid storing it.
+Supported document types are `NIN`, `DRIVERS_LICENSE`, `INTERNATIONAL_PASSPORT`, and `VOTERS_CARD`. BVN is redacted server-side in stored metadata; clients must still avoid storing it. A successful BVN response means Papafi has also attempted the Maplerad Tier 1 customer upgrade and re-fetched the provider customer; missing structured address data returns a Tier 1 KYC error instead of marking local KYC complete.
 
 ## Wallet and Account Flow
 
-Use the authenticated user's `userId` from login or JWT-associated state. Wallet endpoints reject access when the path `userId` does not match the authenticated user.
+Use the authenticated user's `userId` from OTP verification, login, or JWT-associated state. Wallet endpoints reject access when the path `userId` does not match the authenticated user.
 
 | Method | Path | Auth | Params | Success |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/wallet/create/{userId}` | Bearer | `userId` path | Creates or returns an existing NGN wallet and virtual account. |
 | `POST` | `/api/wallet/create-usd/{userId}` | Bearer | `userId` path | Requests USD virtual account creation with Maplerad. |
 | `GET` | `/api/wallet/balance/{userId}` | Bearer | `userId` path | Returns all wallets for the user. |
+
+If Maplerad reports that the customer is not Tier 1, wallet creation returns:
+
+```json
+{
+  "ok": false,
+  "code": "CUSTOMER_NOT_TIER1",
+  "message": "Customer must complete Tier 1 KYC before a NGN virtual account can be created.",
+  "providerStatus": 400,
+  "providerMessage": "service is only available for Tier 1 customers",
+  "requestId": "provider-or-request-id"
+}
+```
 
 Wallet fields include `id`, `currency`, `accountNumber`, `bankName`, `balance`, `availableBalance`, `pendingBalance`, `ledgerBalance`, `usdAccountId`, and `usdAccountStatus`.
 

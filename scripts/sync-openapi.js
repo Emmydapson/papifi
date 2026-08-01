@@ -111,6 +111,58 @@ document.components.schemas.KycResultResponse = {
   },
 };
 
+document.components.schemas.AuthTokenResponse = {
+  type: 'object',
+  properties: {
+    token: { type: 'string', example: 'jwt_token' },
+    userId: { type: 'string', format: 'uuid' },
+    message: { type: 'string' },
+  },
+  required: ['token', 'userId', 'message'],
+};
+
+document.components.schemas.BvnRequest = {
+  type: 'object',
+  required: ['bvn'],
+  properties: {
+    bvn: {
+      type: 'string',
+      pattern: '^\\d{11}$',
+      description: '11 digit BVN. Do not store or log in frontend/mobile clients.',
+      writeOnly: true,
+    },
+    dateOfBirth: {
+      type: 'string',
+      description: 'Optional override for Tier 1 upgrade. Accepted as YYYY-MM-DD or DD-MM-YYYY.',
+      example: '1995-04-12',
+    },
+    phoneNumber: {
+      type: 'string',
+      description: 'Optional Nigerian phone override for Tier 1 upgrade.',
+      example: '+2348012345678',
+    },
+    address: {
+      type: 'object',
+      description: 'Structured home address required by Maplerad Tier 1 upgrade when profile does not already provide these fields.',
+      properties: {
+        street: { type: 'string', example: '12 Example Road' },
+        street2: { type: 'string', nullable: true },
+        city: { type: 'string', example: 'Ikeja' },
+        state: { type: 'string', example: 'Lagos' },
+        country: { type: 'string', example: 'NG' },
+        postal_code: { type: 'string', example: '100001' },
+        postalCode: { type: 'string', example: '100001' },
+      },
+    },
+    city: { type: 'string', description: 'Fallback city if address is stored as a string.' },
+    state: { type: 'string', description: 'Fallback state if address is stored as a string.' },
+    country: { type: 'string', description: 'Fallback country if address is stored as a string.', example: 'NG' },
+    postalCode: { type: 'string', description: 'Fallback postal code if address is stored as a string.' },
+    postal_code: { type: 'string', description: 'Fallback postal code if address is stored as a string.' },
+    photo: { type: 'string', format: 'uri', description: 'Optional selfie/photo URL for Tier 1 upgrade.' },
+  },
+};
+
 document.components.schemas.KycStatusResponse = {
   type: 'object',
   properties: {

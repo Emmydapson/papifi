@@ -132,7 +132,7 @@ export const verifyOtp = async (req: Request, res: Response) => {
       }
       const token = jwt.sign({ id: user.id, email: user.email }, jwtSecret, { expiresIn: '1h' });
 
-      res.status(200).json({ token, message: 'Account verified. Please create your transaction PIN.' });
+      res.status(200).json({ token, userId: user.id, message: 'Account verified. Please create your transaction PIN.' });
   } catch (error) {
       logger.error('otp_verification_failed', error, { requestId: (req as any).id });
       return res.status(500).json({ message: 'An error occurred while verifying the OTP. Please try again later.' });

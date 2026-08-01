@@ -6,7 +6,7 @@ import { Currency, Wallet } from '../entities/Wallet';
 import { VirtualCard } from '../entities/virtualCard';
 import { Transaction } from '../entities/Transaction';
 import { ProviderReference } from '../entities/ProviderReference';
-import { isMapleradProviderError, mapleradErrorToHttpStatus, MapleRadService } from '../services/mapleradService';
+import { isMapleradProviderError, mapleradErrorToClientResponse, mapleradErrorToHttpStatus, MapleRadService } from '../services/mapleradService';
 import { ledgerService } from '../services/ledgerService';
 import { WebhookEvent } from '../entities/WebhookEvent';
 import { auditService } from '../services/auditService';
@@ -117,14 +117,7 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
     return res.status(201).json({ ok: true, wallet });
   } catch (err: any) {
     if (isMapleradProviderError(err)) {
-      return res.status(mapleradErrorToHttpStatus(err)).json({
-        ok: false,
-        message: err.message,
-        code: err.code,
-        providerStatus: err.providerStatus,
-        providerMessage: err.providerMessage,
-        requestId: err.requestId,
-      });
+      return res.status(mapleradErrorToHttpStatus(err)).json(mapleradErrorToClientResponse(err));
     }
     return res.status(400).json({ ok: false, message: err?.message || 'error' });
   }
@@ -140,14 +133,7 @@ router.post('/create-usd/:userId', async (req: Request, res: Response) => {
     return res.status(201).json({ ok: true, usdAccountRequest });
   } catch (err: any) {
     if (isMapleradProviderError(err)) {
-      return res.status(mapleradErrorToHttpStatus(err)).json({
-        ok: false,
-        message: err.message,
-        code: err.code,
-        providerStatus: err.providerStatus,
-        providerMessage: err.providerMessage,
-        requestId: err.requestId,
-      });
+      return res.status(mapleradErrorToHttpStatus(err)).json(mapleradErrorToClientResponse(err));
     }
     return res.status(400).json({ ok: false, message: err?.message || 'error' });
   }

@@ -7,6 +7,7 @@ import {
   MapleradProviderError,
   MapleRadService,
 } from '../services/mapleradService';
+import { AppDataSource } from '../database';
 
 function serviceWithMockedRequest(mock: (options: any) => Promise<any>, raw = true) {
   process.env.MAPLERAD_ENVIRONMENT = 'sandbox';
@@ -358,6 +359,125 @@ test('Nigerian phone normalization handles local and E.164-like forms', () => {
   assert.equal(service.normalizeNigerianPhone('08012345678'), '+2348012345678');
   assert.equal(service.normalizeNigerianPhone('2348012345678'), '+2348012345678');
   assert.equal(service.normalizeNigerianPhone('+2348012345678'), '+2348012345678');
+});
+
+test('ensureCustomerTier1ForBvn upgrades existing Maplerad customer and re-fetches tier status', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const calls: any[] = [];
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1', phoneNumber: '+2348012345678' };
+  const manager: any = {
+    getRepository: (entity: any) => ({
+      createQueryBuilder: () => ({
+        where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+      }),
+      findOne: async () => ({ id: 'profile-1', dateOfBirth: '1990-01-31', address: '12 Example Road', country: 'NG' }),
+      create: (value: any) => value,
+      save: async (value: any) => value,
+    }),
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async (customerId: string) => {
+    calls.push({ type: 'get', customerId });
+    return calls.filter((call) => call.type === 'get').length === 1
+      ? { id: customerId, tier: '0' }
+      : { id: customerId, tier: '1' };
+  };
+  (service as any).upgradeCustomerTier1 = async (payload: any) => {
+    calls.push({ type: 'upgrade', payload });
+    return { status: true };
+  };
+
+  try {
+    const result = await service.ensureCustomerTier1ForBvn('user-1', {
+      bvn: '12345678901',
+      city: 'Ikeja',
+      state: 'Lagos',
+      postalCode: '100001',
+    });
+    assert.equal(result.tier1, true);
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  const upgrade = calls.find((call) => call.type === 'upgrade');
+  assert.deepEqual(upgrade.payload, {
+    customer_id: 'cus_1',
+    dob: '31-01-1990',
+    identification_number: '12345678901',
+    phone: { phone_country_code: '+234', phone_number: '8012345678' },
+    address: {
+      street: '12 Example Road',
+      street2: null,
+      city: 'Ikeja',
+      state: 'Lagos',
+      country: 'NG',
+      postal_code: '100001',
+    },
+  });
+  assert.deepEqual(calls.filter((call) => call.type === 'get').map((call) => call.customerId), ['cus_1', 'cus_1']);
+});
+
+test('createVirtualAccountForUser sends top-level customer_id after Tier 1 preflight', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  let observed: any;
+  const user = { id: 'user-1' };
+  const walletRepo: any = {
+    findOne: async () => null,
+    create: (value: any) => value,
+    save: async (value: any) => value,
+  };
+  const referenceRepo: any = {
+    findOne: async () => null,
+    create: (value: any) => value,
+    save: async (value: any) => value,
+  };
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Wallet') return walletRepo;
+      if (entity?.name === 'ProviderReference') return referenceRepo;
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async () => ({ id: 'cus_1', tier: '1' });
+  (service as any).getCustomerVirtualAccounts = async () => [];
+  (service as any).requestMaplerad = async (options: any) => {
+    observed = options;
+    return { id: 'acct_1', account_number: '1234567890', bank_name: 'Test Bank', currency: 'NGN' };
+  };
+
+  try {
+    await service.createVirtualAccountForUser('user-1', 'NGN');
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.equal(observed.operation, 'maplerad.virtual_account.create');
+  assert.equal(observed.path, '/collections/virtual-account');
+  assert.deepEqual(observed.payload, { customer_id: 'cus_1', currency: 'NGN' });
+});
+
+test('Tier 0 virtual account failure maps to CUSTOMER_NOT_TIER1 response', async () => {
+  const error = new MapleradProviderError(
+    'maplerad.virtual_account.create failed with Maplerad status 400: service is only available for Tier 1 customers',
+    'maplerad.virtual_account.create',
+    400,
+    'service is only available for Tier 1 customers',
+    'req-tier',
+    { message: 'service is only available for Tier 1 customers' },
+    'VALIDATION'
+  );
+
+  assert.equal(mapleradErrorToApplicationCode(error), 'CUSTOMER_NOT_TIER1');
+  assert.equal(mapleradErrorToHttpStatus(error), 400);
 });
 
 test('name or phone mismatch is never inferred from insufficient balance', async () => {
