@@ -22,6 +22,7 @@ type MapleradEnvelope<T> = {
 
 type MapleradCustomer = {
   id: string;
+  customer_id?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -394,8 +395,69 @@ export class MapleRadService {
   }
 
   private providerMessage(body: any) {
-    const value = body?.message || body?.error || body?.errors?.[0]?.message || body?.detail || body?.data?.message;
+    const value =
+      body?.message ||
+      body?.error ||
+      body?.errors?.[0]?.message ||
+      body?.errors?.[0] ||
+      body?.detail ||
+      body?.data?.message ||
+      body?.data?.error;
     return value ? String(value).slice(0, 240) : undefined;
+  }
+
+  private hasProviderErrorPayload(body: any) {
+    if (!body || typeof body !== 'object') return false;
+    const status = String(body.status ?? body.data?.status ?? '').toLowerCase();
+    const ok = body.ok ?? body.success ?? body.data?.ok ?? body.data?.success;
+    return (
+      Boolean(body.error || body.errors || body.detail || body.data?.error || body.data?.errors) ||
+      ok === false ||
+      ['false', 'failed', 'failure', 'error'].includes(status)
+    );
+  }
+
+  private extractMapleradCustomer(body: any): MapleradCustomer | undefined {
+    const candidates = [
+      body?.data?.customer,
+      body?.customer,
+      body?.data?.data?.customer,
+      body?.data?.data,
+      body?.data,
+      body,
+    ];
+    return candidates.find((candidate) => candidate && typeof candidate === 'object' && (candidate.id || candidate.customer_id));
+  }
+
+  private parseCustomerCreateResponse(body: any): MapleradCustomer {
+    if (this.hasProviderErrorPayload(body)) {
+      const providerMessage = this.providerMessage(body) || 'Maplerad returned an error payload';
+      throw new MapleradProviderError(
+        `maplerad.customer.create failed: ${providerMessage}`,
+        'maplerad.customer.create',
+        undefined,
+        providerMessage,
+        undefined,
+        this.sanitizeProviderPayload(body),
+        this.providerErrorCode(undefined, providerMessage)
+      );
+    }
+
+    const customer = this.extractMapleradCustomer(body);
+    const customerId = customer?.id || customer?.customer_id;
+    if (!customerId) {
+      throw new MapleradProviderError(
+        'Maplerad customer creation returned malformed response',
+        'maplerad.customer.create',
+        undefined,
+        'missing customer id',
+        undefined,
+        this.sanitizeProviderPayload(body),
+        'SCHEMA'
+      );
+    }
+
+    return { ...customer, id: String(customerId) };
   }
 
   private providerErrorCode(status?: number, message?: string, axiosCode?: string): MapleradProviderErrorCode {
@@ -593,25 +655,23 @@ export class MapleRadService {
     };
 
     try {
-      const customer = await this.requestMaplerad<MapleradCustomer>({
+      const response = await this.requestMapleradRaw<MapleradCustomer>({
         operation: 'maplerad.customer.create',
         method: 'POST',
         path: '/customers',
         payload,
       });
+      const safeResponseBody = this.sanitizeProviderPayload(response.data);
+      logger.info('maplerad_customer_create_provider_response', {
+        operation: 'maplerad.customer.create',
+        endpoint: '/customers',
+        providerStatus: response.status,
+        requestId: this.providerRequestId(response.headers),
+        providerResponseBody: safeResponseBody,
+      });
 
-      const customerId = customer?.id;
-      if (!customerId) {
-        throw new MapleradProviderError(
-          'Maplerad customer creation returned malformed response',
-          'maplerad.customer.create',
-          undefined,
-          'missing customer id',
-          undefined,
-          this.sanitizeProviderPayload(customer),
-          'SCHEMA'
-        );
-      }
+      const customer = this.parseCustomerCreateResponse(response.data);
+      const customerId = customer.id;
 
       reference = manager.getRepository(ProviderReference).create({
         user,

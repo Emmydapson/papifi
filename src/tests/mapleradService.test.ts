@@ -9,6 +9,34 @@ import {
 } from '../services/mapleradService';
 import { AppDataSource } from '../database';
 
+function customerCreationManager(savedReferences: any[] = []) {
+  const user = { id: 'user-1', email: 'ada@example.com', firstName: 'Ada', lastName: 'Okafor' };
+  const references: any[] = [];
+  return {
+    user,
+    manager: {
+      getRepository: (entity: any) => {
+        if (entity?.name === 'ProviderReference') {
+          return {
+            findOne: async () => references[0],
+            create: (value: any) => value,
+            save: async (value: any) => {
+              references[0] = value;
+              savedReferences.push(value);
+              return value;
+            },
+          };
+        }
+        return {
+          createQueryBuilder: () => ({
+            where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+          }),
+        };
+      },
+    },
+  };
+}
+
 function serviceWithMockedRequest(mock: (options: any) => Promise<any>, raw = true) {
   process.env.MAPLERAD_ENVIRONMENT = 'sandbox';
   process.env.MAPLERAD_SANDBOX_SECRET_KEY = 'sk_test_docs_only';
@@ -343,6 +371,119 @@ test('ensureMapleRadCustomer reuses existing reference instead of creating dupli
   assert.deepEqual(calls, ['cus_existing']);
 });
 
+test('ensureMapleRadCustomer creates customer and persists extracted customer id', async () => {
+  const savedReferences: any[] = [];
+  const calls: any[] = [];
+  const service = serviceWithMockedRequest(async (options) => {
+    calls.push(options);
+    return {
+      status: 200,
+      headers: { 'x-request-id': 'req-customer-create' },
+      data: {
+        status: true,
+        message: 'Customer created',
+        data: {
+          id: 'cus_created',
+          first_name: 'Ada',
+          last_name: 'Okafor',
+          email: 'ada@example.com',
+          country: 'NG',
+        },
+      },
+    };
+  }, true);
+  const { user, manager } = customerCreationManager(savedReferences);
+
+  const customerId = await (service as any).ensureMapleRadCustomerForUser(user.id, manager);
+
+  assert.equal(customerId, 'cus_created');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].operation, 'maplerad.customer.create');
+  assert.deepEqual(calls[0].payload, {
+    first_name: 'Ada',
+    last_name: 'Okafor',
+    email: 'ada@example.com',
+    country: 'NG',
+  });
+  assert.equal(savedReferences[0].providerCustomerId, 'cus_created');
+  assert.equal(savedReferences[0].externalReference, 'cus_created');
+  assert.equal(savedReferences[0].status, 'active');
+});
+
+test('customer creation parser supports data.id response', async () => {
+  const service = serviceWithMockedRequest(async () => null);
+  const customer = (service as any).parseCustomerCreateResponse({
+    status: true,
+    message: 'Customer created',
+    data: { id: 'cus_data_id', email: 'ada@example.com' },
+  });
+
+  assert.equal(customer.id, 'cus_data_id');
+  assert.equal(customer.email, 'ada@example.com');
+});
+
+test('customer creation parser supports nested customer object response', async () => {
+  const service = serviceWithMockedRequest(async () => null);
+  const customer = (service as any).parseCustomerCreateResponse({
+    status: true,
+    message: 'Customer created',
+    data: {
+      customer: {
+        id: 'cus_nested',
+        first_name: 'Ada',
+      },
+    },
+  });
+
+  assert.equal(customer.id, 'cus_nested');
+  assert.equal(customer.first_name, 'Ada');
+});
+
+test('customer creation parser surfaces provider error payload', async () => {
+  const service = serviceWithMockedRequest(async () => null);
+
+  assert.throws(
+    () =>
+      (service as any).parseCustomerCreateResponse({
+        status: false,
+        message: 'customer already enrolled',
+        errors: [{ message: 'email already exists' }],
+      }),
+    (error: any) => {
+      assert.equal(isMapleradProviderError(error), true);
+      assert.equal(error.operation, 'maplerad.customer.create');
+      assert.equal(error.providerMessage, 'customer already enrolled');
+      assert.notEqual(error.providerMessage, 'missing customer id');
+      assert.deepEqual(error.safeResponseBody, {
+        status: false,
+        message: 'customer already enrolled',
+        errors: [{ message: 'email already exists' }],
+      });
+      return true;
+    }
+  );
+});
+
+test('customer creation parser rejects missing id response as contract error', async () => {
+  const service = serviceWithMockedRequest(async () => null);
+
+  assert.throws(
+    () =>
+      (service as any).parseCustomerCreateResponse({
+        status: true,
+        message: 'Customer created',
+        data: { email: 'ada@example.com' },
+      }),
+    (error: any) => {
+      assert.equal(isMapleradProviderError(error), true);
+      assert.equal(error.code, 'SCHEMA');
+      assert.equal(mapleradErrorToApplicationCode(error), 'MAPLERAD_CONTRACT_ERROR');
+      assert.equal(error.providerMessage, 'missing customer id');
+      return true;
+    }
+  );
+});
+
 test('identity-name normalization preserves surname field semantics', () => {
   const service = serviceWithMockedRequest(async () => null);
   assert.equal(service.normalizeIdentityName('  O.KA-FOR  '), 'okafor');
@@ -463,6 +604,76 @@ test('createVirtualAccountForUser sends top-level customer_id after Tier 1 prefl
   assert.equal(observed.operation, 'maplerad.virtual_account.create');
   assert.equal(observed.path, '/collections/virtual-account');
   assert.deepEqual(observed.payload, { customer_id: 'cus_1', currency: 'NGN' });
+});
+
+test('createVirtualAccountForUser continues with newly extracted customer id and persists it', async () => {
+  const service = serviceWithMockedRequest(async () => ({
+    status: 200,
+    headers: { 'x-request-id': 'req-customer-wallet' },
+    data: {
+      status: true,
+      message: 'Customer created',
+      data: { customer: { id: 'cus_wallet', email: 'ada@example.com', first_name: 'Ada', last_name: 'Okafor' } },
+    },
+  }), true);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1', email: 'ada@example.com', firstName: 'Ada', lastName: 'Okafor' };
+  let reference: any;
+  let savedWallet: any;
+  let virtualAccountRequest: any;
+  const walletRepo: any = {
+    findOne: async () => null,
+    create: (value: any) => value,
+    save: async (value: any) => {
+      savedWallet = value;
+      return value;
+    },
+  };
+  const referenceRepo: any = {
+    findOne: async () => reference,
+    create: (value: any) => value,
+    save: async (value: any) => {
+      reference = value;
+      return value;
+    },
+  };
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Wallet') return walletRepo;
+      if (entity?.name === 'ProviderReference') return referenceRepo;
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).getCustomerById = async (customerId: string) => {
+    assert.equal(customerId, 'cus_wallet');
+    return { id: customerId, tier: '1', email: user.email, first_name: user.firstName, last_name: user.lastName };
+  };
+  (service as any).getCustomerVirtualAccounts = async (customerId: string) => {
+    assert.equal(customerId, 'cus_wallet');
+    return [];
+  };
+  (service as any).requestMaplerad = async (options: any) => {
+    virtualAccountRequest = options;
+    return { id: 'acct_wallet', account_number: '1234567890', bank_name: 'Test Bank', currency: 'NGN' };
+  };
+
+  try {
+    await service.createVirtualAccountForUser('user-1', 'NGN');
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.deepEqual(virtualAccountRequest.payload, { customer_id: 'cus_wallet', currency: 'NGN' });
+  assert.equal(reference.providerCustomerId, 'cus_wallet');
+  assert.equal(reference.externalReference, 'cus_wallet');
+  assert.equal(reference.providerAccountId, 'acct_wallet');
+  assert.equal(savedWallet.mapleradAccountId, 'acct_wallet');
+  assert.equal(savedWallet.accountNumber, '1234567890');
 });
 
 test('Tier 0 virtual account failure maps to CUSTOMER_NOT_TIER1 response', async () => {
