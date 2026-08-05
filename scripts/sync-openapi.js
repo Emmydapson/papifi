@@ -219,6 +219,41 @@ document.components.schemas.KycDocumentSummary = {
   },
 };
 
+document.components.schemas.SafeWallet = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    currency: { $ref: '#/components/schemas/Currency' },
+    availableBalance: { type: 'number', example: 0 },
+    pendingBalance: { type: 'number', example: 0 },
+    ledgerBalance: { type: 'number', example: 0 },
+    accountNumber: { type: 'string', nullable: true, example: '******7890' },
+    bankName: { type: 'string', nullable: true },
+    status: { type: 'string' },
+    providerEnvironment: { type: 'string', enum: ['sandbox', 'production'] },
+  },
+};
+document.components.schemas.WalletResponse = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean' },
+    wallet: { $ref: '#/components/schemas/SafeWallet' },
+  },
+};
+document.components.schemas.WalletListResponse = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean' },
+    walletState: { type: 'string', enum: ['PROVISIONED', 'NOT_PROVISIONED', 'RECONCILIATION_REQUIRED'] },
+    wallets: {
+      type: 'array',
+      items: { $ref: '#/components/schemas/SafeWallet' },
+    },
+  },
+};
+document.components.schemas.UsdAccountRequestResponse = document.components.schemas.WalletResponse;
+
 const serializedDocument = `${JSON.stringify(document, null, 2)}\n`;
 fs.writeFileSync(jsonPath, serializedDocument);
 fs.writeFileSync(yamlPath, YAML.stringify(document, 10, 2));

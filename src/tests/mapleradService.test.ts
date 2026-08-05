@@ -5,6 +5,7 @@ import {
   isMapleradProviderError,
   mapleradErrorToHttpStatus,
   MapleradProviderError,
+  MapleradCustomerRecoveryError,
   MapleRadService,
 } from '../services/mapleradService';
 import { AppDataSource } from '../database';
@@ -25,6 +26,12 @@ function customerCreationManager(savedReferences: any[] = []) {
               savedReferences.push(value);
               return value;
             },
+          };
+        }
+        if (entity?.name === 'AuditLog') {
+          return {
+            create: (value: any) => value,
+            save: async (value: any) => value,
           };
         }
         return {
@@ -393,6 +400,7 @@ test('ensureMapleRadCustomer creates customer and persists extracted customer id
     };
   }, true);
   const { user, manager } = customerCreationManager(savedReferences);
+  (service as any).activeRecoveryCooldown = async () => undefined;
 
   const customerId = await (service as any).ensureMapleRadCustomerForUser(user.id, manager);
 
@@ -579,6 +587,12 @@ test('createVirtualAccountForUser sends top-level customer_id after Tier 1 prefl
     getRepository: (entity: any) => {
       if (entity?.name === 'Wallet') return walletRepo;
       if (entity?.name === 'ProviderReference') return referenceRepo;
+      if (entity?.name === 'AuditLog') {
+        return {
+          create: (value: any) => value,
+          save: async (value: any) => value,
+        };
+      }
       return {
         createQueryBuilder: () => ({
           where: () => ({ setLock: () => ({ getOne: async () => user }) }),
@@ -616,9 +630,10 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
       data: { customer: { id: 'cus_wallet', email: 'ada@example.com', first_name: 'Ada', last_name: 'Okafor' } },
     },
   }), true);
+  (service as any).activeRecoveryCooldown = async () => undefined;
   const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
   const user = { id: 'user-1', email: 'ada@example.com', firstName: 'Ada', lastName: 'Okafor' };
-  let reference: any;
+  const references: any[] = [];
   let savedWallet: any;
   let virtualAccountRequest: any;
   const walletRepo: any = {
@@ -630,10 +645,12 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
     },
   };
   const referenceRepo: any = {
-    findOne: async () => reference,
+    findOne: async ({ where }: any) => references.find((ref) =>
+      ref.referenceType === where.referenceType && (!where.currency || ref.currency === where.currency)
+    ),
     create: (value: any) => value,
     save: async (value: any) => {
-      reference = value;
+      references.push(value);
       return value;
     },
   };
@@ -641,6 +658,12 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
     getRepository: (entity: any) => {
       if (entity?.name === 'Wallet') return walletRepo;
       if (entity?.name === 'ProviderReference') return referenceRepo;
+      if (entity?.name === 'AuditLog') {
+        return {
+          create: (value: any) => value,
+          save: async (value: any) => value,
+        };
+      }
       return {
         createQueryBuilder: () => ({
           where: () => ({ setLock: () => ({ getOne: async () => user }) }),
@@ -669,9 +692,12 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
   }
 
   assert.deepEqual(virtualAccountRequest.payload, { customer_id: 'cus_wallet', currency: 'NGN' });
-  assert.equal(reference.providerCustomerId, 'cus_wallet');
-  assert.equal(reference.externalReference, 'cus_wallet');
-  assert.equal(reference.providerAccountId, 'acct_wallet');
+  const customerReference = references.find((ref) => ref.referenceType === 'customer');
+  const accountReference = references.find((ref) => ref.referenceType === 'account' && ref.currency === 'NGN');
+  assert.equal(customerReference.providerCustomerId, 'cus_wallet');
+  assert.equal(customerReference.externalReference, 'cus_wallet');
+  assert.equal(accountReference.providerCustomerId, 'cus_wallet');
+  assert.equal(accountReference.providerAccountId, 'acct_wallet');
   assert.equal(savedWallet.mapleradAccountId, 'acct_wallet');
   assert.equal(savedWallet.accountNumber, '1234567890');
 });
@@ -720,4 +746,359 @@ test('Tier 1 upgrade is a separate operation from standalone BVN verification', 
 
   await service.verifyBvn('12345678901');
   assert.deepEqual(operations, ['maplerad.identity.verify_bvn']);
+});
+
+test('customer already enrolled maps to reconciliation required client response', () => {
+  const error = new MapleradProviderError(
+    'maplerad.customer.create failed: customer is already enrolled',
+    'maplerad.customer.create',
+    400,
+    'customer is already enrolled',
+    'req-enrolled',
+    { message: 'customer is already enrolled' },
+    'VALIDATION'
+  );
+
+  assert.equal(mapleradErrorToApplicationCode(error), 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED');
+  assert.equal(mapleradErrorToHttpStatus(error), 400);
+});
+
+test('createUsdVirtualAccount reuses existing customer reference and persists USD wallet', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const operations: string[] = [];
+  const user = { id: 'user-1', email: 'ada@example.com', firstName: 'Ada', lastName: 'Okafor' };
+  const references: any[] = [{
+    userId: user.id,
+    provider: 'maplerad',
+    providerEnvironment: 'sandbox',
+    referenceType: 'customer',
+    providerCustomerId: 'cus_shared',
+  }];
+  let savedWallet: any;
+
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Wallet') {
+        return {
+          findOne: async () => null,
+          create: (value: any) => value,
+          save: async (value: any) => {
+            savedWallet = value;
+            return value;
+          },
+        };
+      }
+      if (entity?.name === 'ProviderReference') {
+        return {
+          findOne: async ({ where }: any) => references.find((ref) =>
+            ref.referenceType === where.referenceType && (!where.currency || ref.currency === where.currency)
+          ),
+          create: (value: any) => value,
+          save: async (value: any) => {
+            references.push(value);
+            return value;
+          },
+        };
+      }
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).getCustomerById = async (customerId: string) => ({
+    id: customerId,
+    email: user.email,
+    first_name: user.firstName,
+    last_name: user.lastName,
+  });
+  (service as any).getCustomerVirtualAccounts = async () => [];
+  (service as any).requestMaplerad = async (options: any) => {
+    operations.push(options.operation);
+    return { id: 'usd_acct_1', account_number: '1234567890', bank_name: 'USD Bank', currency: 'USD', status: 'pending' };
+  };
+
+  try {
+    const wallet = await service.createUsdVirtualAccount(user.id);
+    assert.equal(wallet.currency, 'USD');
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.deepEqual(operations, ['maplerad.virtual_account.create_usd']);
+  assert.equal(savedWallet.mapleradAccountId, 'usd_acct_1');
+  assert.equal(savedWallet.usdAccountId, 'usd_acct_1');
+  const usdReference = references.find((ref) => ref.referenceType === 'account' && ref.currency === 'USD');
+  assert.equal(usdReference.providerCustomerId, 'cus_shared');
+  assert.equal(usdReference.providerAccountId, 'usd_acct_1');
+});
+
+test('createVirtualAccountForUser repairs missing NGN wallet from existing provider account', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1', email: 'ada@example.com', firstName: 'Ada', lastName: 'Okafor' };
+  const references: any[] = [{
+    userId: user.id,
+    provider: 'maplerad',
+    providerEnvironment: 'sandbox',
+    referenceType: 'customer',
+    providerCustomerId: 'cus_shared',
+  }];
+  let savedWallet: any;
+  const providerCreates: any[] = [];
+
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Wallet') {
+        return {
+          findOne: async () => null,
+          create: (value: any) => value,
+          save: async (value: any) => {
+            savedWallet = value;
+            return value;
+          },
+        };
+      }
+      if (entity?.name === 'ProviderReference') {
+        return {
+          findOne: async ({ where }: any) => references.find((ref) =>
+            ref.referenceType === where.referenceType && (!where.currency || ref.currency === where.currency)
+          ),
+          create: (value: any) => value,
+          save: async (value: any) => {
+            references.push(value);
+            return value;
+          },
+        };
+      }
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).getCustomerById = async (customerId: string) => ({
+    id: customerId,
+    tier: '1',
+    email: user.email,
+    first_name: user.firstName,
+    last_name: user.lastName,
+  });
+  (service as any).getCustomerVirtualAccounts = async () => [
+    { id: 'ngn_acct_1', account_number: '1234567890', bank_name: 'NGN Bank', currency: 'NGN' },
+  ];
+  (service as any).requestMaplerad = async (options: any) => {
+    providerCreates.push(options);
+    throw new Error('provider account create should not be called');
+  };
+
+  try {
+    await service.createVirtualAccountForUser(user.id, 'NGN');
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.equal(providerCreates.length, 0);
+  assert.equal(savedWallet.mapleradAccountId, 'ngn_acct_1');
+  const ngnReference = references.find((ref) => ref.referenceType === 'account' && ref.currency === 'NGN');
+  assert.equal(ngnReference.providerCustomerId, 'cus_shared');
+  assert.equal(ngnReference.providerAccountId, 'ngn_acct_1');
+});
+
+test('bounded customer recovery pagination stops when a page is shorter than page size', async () => {
+  process.env.MAPLERAD_CUSTOMER_RECOVERY_PAGE_SIZE = '2';
+  process.env.MAPLERAD_CUSTOMER_RECOVERY_MAX_PAGES = '20';
+  const pages: number[] = [];
+  const service = serviceWithMockedRequest(async (options) => {
+    pages.push(options.params.page);
+    return {
+      status: 200,
+      headers: { 'x-request-id': `req-page-${options.params.page}` },
+      data: {
+        data: options.params.page === 1
+          ? [
+              { id: 'cus_1', email: 'one@example.com' },
+              { id: 'cus_2', email: 'two@example.com' },
+            ]
+          : [{ id: 'cus_3', email: 'three@example.com' }],
+      },
+    };
+  }, true);
+
+  const result = await service.listCustomersForRecovery();
+
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(result.customers.length, 3);
+  assert.deepEqual(result.requestIds, ['req-page-1', 'req-page-2']);
+});
+
+test('customer recovery identity matching requires verified email phone and names', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const user: any = {
+    id: 'user-1',
+    email: ' ADA@Example.com ',
+    phoneNumber: '08012345678',
+    firstName: 'Ada',
+    lastName: 'Oka-for',
+    isVerified: true,
+    isKYCVerified: true,
+  };
+  const manager: any = {
+    getRepository: () => ({
+      findOne: async () => null,
+    }),
+  };
+
+  const exact = await service.evaluateCustomerIdentityMatch(user, {
+    id: 'cus_1',
+    email: 'ada@example.com',
+    phone: '+2348012345678',
+    first_name: 'Ada',
+    last_name: 'Okafor',
+  } as any, manager);
+  const partial = await service.evaluateCustomerIdentityMatch(user, {
+    id: 'cus_2',
+    email: 'ada@example.com',
+    phone: '+2348012345678',
+    first_name: 'Ada',
+    last_name: 'Other',
+  } as any, manager);
+
+  assert.equal(exact.exact, true);
+  assert.deepEqual(exact.matchedFields.sort(), ['email', 'first_name', 'last_name', 'phone'].sort());
+  assert.equal(partial.exact, false);
+  assert.deepEqual(partial.mismatches, ['last_name']);
+});
+
+test('already enrolled recovery persists exactly one matched customer and continues', async () => {
+  const service = serviceWithMockedRequest(async (options) => {
+    if (options.operation === 'maplerad.customer.create') {
+      throw new MapleradProviderError(
+        'maplerad.customer.create failed: customer is already enrolled',
+        'maplerad.customer.create',
+        400,
+        'customer is already enrolled',
+        'req-enrolled',
+        { message: 'customer is already enrolled' },
+        'VALIDATION'
+      );
+    }
+    throw new Error('unexpected request');
+  }, true);
+  const user: any = {
+    id: 'user-1',
+    email: 'ada@example.com',
+    phoneNumber: '+2348012345678',
+    firstName: 'Ada',
+    lastName: 'Okafor',
+    isVerified: true,
+    isKYCVerified: true,
+  };
+  const references: any[] = [];
+  const audits: any[] = [];
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'ProviderReference') {
+        return {
+          findOne: async ({ where }: any) => references.find((ref) =>
+            ref.referenceType === where.referenceType &&
+            (!where.providerCustomerId || ref.providerCustomerId === where.providerCustomerId)
+          ),
+          create: (value: any) => ({ id: 'ref-1', ...value }),
+          save: async (value: any) => {
+            references.push(value);
+            return value;
+          },
+        };
+      }
+      if (entity?.name === 'AuditLog') {
+        return {
+          create: (value: any) => value,
+          save: async (value: any) => {
+            audits.push(value);
+            return value;
+          },
+        };
+      }
+      if (entity?.name === 'Profile') {
+        return { findOne: async () => null };
+      }
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (service as any).activeRecoveryCooldown = async () => undefined;
+  (service as any).recordRecoveryAttempt = async () => undefined;
+  (service as any).listCustomersForRecovery = async () => ({
+    customers: [{
+      id: 'cus_recovered',
+      email: 'ada@example.com',
+      phone: '+2348012345678',
+      first_name: 'Ada',
+      last_name: 'Okafor',
+    }],
+    requestIds: ['req-list'],
+    limits: {},
+  });
+
+  const customerId = await (service as any).ensureMapleRadCustomerForUser(user.id, manager);
+
+  assert.equal(customerId, 'cus_recovered');
+  assert.equal(references.length, 1);
+  assert.equal(references[0].referenceType, 'customer');
+  assert.equal(references[0].providerCustomerId, 'cus_recovered');
+  assert.equal(references[0].status, 'auto_recovered');
+  assert.equal(audits[0].action, 'MAPLERAD_CUSTOMER_AUTO_RECONCILED');
+});
+
+test('already enrolled recovery refuses multiple exact matches', async () => {
+  const service = serviceWithMockedRequest(async () => null, true);
+  const user: any = {
+    id: 'user-1',
+    email: 'ada@example.com',
+    phoneNumber: '+2348012345678',
+    firstName: 'Ada',
+    lastName: 'Okafor',
+    isVerified: true,
+    isKYCVerified: true,
+  };
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Profile') return { findOne: async () => null };
+      return { findOne: async () => null };
+    },
+  };
+  (service as any).activeRecoveryCooldown = async () => undefined;
+  (service as any).recordRecoveryAttempt = async () => undefined;
+  (service as any).listCustomersForRecovery = async () => ({
+    customers: [
+      { id: 'cus_1', email: 'ada@example.com', phone: '+2348012345678', first_name: 'Ada', last_name: 'Okafor' },
+      { id: 'cus_2', email: 'ada@example.com', phone: '+2348012345678', first_name: 'Ada', last_name: 'Okafor' },
+    ],
+    requestIds: [],
+    limits: {},
+  });
+
+  await assert.rejects(
+    () => (service as any).recoverAlreadyEnrolledCustomer(
+      user,
+      manager,
+      new MapleradProviderError('already enrolled', 'maplerad.customer.create', 400, 'customer is already enrolled', 'req', {}, 'VALIDATION')
+    ),
+    (error: any) => {
+      assert.equal(error instanceof MapleradCustomerRecoveryError, true);
+      assert.equal(error.applicationCode, 'MAPLERAD_CUSTOMER_AMBIGUOUS');
+      return true;
+    }
+  );
 });

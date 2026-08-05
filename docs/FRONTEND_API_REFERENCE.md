@@ -194,6 +194,16 @@ Use the authenticated user's `userId` from OTP verification, login, or JWT-assoc
 | `POST` | `/api/wallet/create-usd/{userId}` | Bearer | `userId` path | Requests USD virtual account creation with Maplerad. |
 | `GET` | `/api/wallet/balance/{userId}` | Bearer | `userId` path | Returns all wallets for the user. |
 
+Wallet balance responses include `walletState`:
+
+- `PROVISIONED` when local wallets exist.
+- `NOT_PROVISIONED` when no local or provider-reference evidence exists.
+- `RECONCILIATION_REQUIRED` when a provider customer/account reference exists but local wallet rows are incomplete.
+
+Wallet account numbers are masked and provider payloads are never returned.
+
+If Maplerad reports `customer is already enrolled`, the backend attempts bounded automatic recovery using documented customer pagination. Recovery is automatic only when exactly one customer matches verified email, phone, first name, and last name. The frontend must never supply a Maplerad customer ID.
+
 If Maplerad reports that the customer is not Tier 1, wallet creation returns:
 
 ```json

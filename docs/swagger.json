@@ -2309,7 +2309,7 @@
             "type": "boolean"
           },
           "wallet": {
-            "$ref": "#/components/schemas/Wallet"
+            "$ref": "#/components/schemas/SafeWallet"
           }
         }
       },
@@ -2319,10 +2319,18 @@
           "ok": {
             "type": "boolean"
           },
+          "walletState": {
+            "type": "string",
+            "enum": [
+              "PROVISIONED",
+              "NOT_PROVISIONED",
+              "RECONCILIATION_REQUIRED"
+            ]
+          },
           "wallets": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Wallet"
+              "$ref": "#/components/schemas/SafeWallet"
             }
           }
         }
@@ -2333,13 +2341,8 @@
           "ok": {
             "type": "boolean"
           },
-          "usdAccountRequest": {
-            "type": "object",
-            "additionalProperties": true,
-            "example": {
-              "reference": "usd_account_request_reference",
-              "status": "pending"
-            }
+          "wallet": {
+            "$ref": "#/components/schemas/SafeWallet"
           }
         }
       },
@@ -2888,6 +2891,50 @@
           "attemptCount": {
             "type": "integer",
             "minimum": 1
+          }
+        }
+      },
+      "SafeWallet": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "$ref": "#/components/schemas/Currency"
+          },
+          "availableBalance": {
+            "type": "number",
+            "example": 0
+          },
+          "pendingBalance": {
+            "type": "number",
+            "example": 0
+          },
+          "ledgerBalance": {
+            "type": "number",
+            "example": 0
+          },
+          "accountNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "******7890"
+          },
+          "bankName": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string"
+          },
+          "providerEnvironment": {
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "production"
+            ]
           }
         }
       }

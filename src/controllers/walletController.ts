@@ -12,6 +12,7 @@ import { WebhookEvent } from '../entities/WebhookEvent';
 import { auditService } from '../services/auditService';
 import { limitService } from '../services/limitService';
 import { riskService } from '../services/riskService';
+import { logger } from '../services/logger';
 
 const router = Router();
 let mapleRadServiceInstance: MapleRadService | undefined;
@@ -109,12 +110,12 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
     const userId = authorization.userId;
 
     const existing = await walletRepo.findOne({ where: { user: { id: userId }, currency: 'NGN' } });
-    if (existing) return res.status(200).json({ ok: true, wallet: existing });
+    if (existing) return res.status(200).json({ ok: true, wallet: mapleRadService.formatWalletForClient(existing) });
 
     await mapleRadService.createVirtualAccountForUser(userId, 'NGN');
     const wallet = await walletRepo.findOne({ where: { user: { id: userId }, currency: 'NGN' } });
     await auditService.log({ actorUserId: userId, targetUserId: userId, action: 'WALLET_CREATED', entityType: 'Wallet', entityId: wallet?.id, req });
-    return res.status(201).json({ ok: true, wallet });
+    return res.status(201).json({ ok: true, wallet: wallet ? mapleRadService.formatWalletForClient(wallet) : null });
   } catch (err: any) {
     if (isMapleradProviderError(err)) {
       return res.status(mapleradErrorToHttpStatus(err)).json(mapleradErrorToClientResponse(err));
@@ -129,8 +130,8 @@ router.post('/create-usd/:userId', async (req: Request, res: Response) => {
     if (!authorization.ok) return res.status(authorization.status).json({ ok: false, message: authorization.message });
     const userId = authorization.userId;
 
-    const usdAccountRequest = await mapleRadService.createUsdVirtualAccount(userId);
-    return res.status(201).json({ ok: true, usdAccountRequest });
+    const wallet = await mapleRadService.createUsdVirtualAccount(userId);
+    return res.status(201).json({ ok: true, wallet: mapleRadService.formatWalletForClient(wallet) });
   } catch (err: any) {
     if (isMapleradProviderError(err)) {
       return res.status(mapleradErrorToHttpStatus(err)).json(mapleradErrorToClientResponse(err));
@@ -145,8 +146,30 @@ router.get('/balance/:userId', async (req: Request, res: Response) => {
     if (!authorization.ok) return res.status(authorization.status).json({ ok: false, message: authorization.message });
     const userId = authorization.userId;
 
-    const wallets = await walletRepo.find({ where: { user: { id: userId } } });
-    return res.json({ ok: true, wallets });
+    const wallets = await walletRepo.find({ where: { user: { id: userId } }, order: { currency: 'ASC' } });
+    if (wallets.length > 0) {
+      return res.json({ ok: true, walletState: 'PROVISIONED', wallets: wallets.map((wallet) => mapleRadService.formatWalletForClient(wallet)) });
+    }
+
+    const providerReferences = await providerReferenceRepo.find({
+      where: {
+        userId,
+        provider: 'maplerad',
+        providerEnvironment: mapleRadService.getEnvironment(),
+      },
+    });
+    if (providerReferences.length > 0) {
+      logger.warn('wallet_balance_local_wallet_missing_for_provider_accounts', {
+        userId,
+        provider: 'maplerad',
+        providerEnvironment: mapleRadService.getEnvironment(),
+        referenceTypes: providerReferences.map((reference) => reference.referenceType),
+        currencies: providerReferences.map((reference) => reference.currency).filter(Boolean),
+      });
+      return res.json({ ok: true, wallets: [], walletState: 'RECONCILIATION_REQUIRED' });
+    }
+
+    return res.json({ ok: true, wallets: [], walletState: 'NOT_PROVISIONED' });
   } catch (err: any) {
     return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
@@ -447,6 +470,7 @@ export const mapleradWebhookHandler = async (req: Request, res: Response) => {
         where: {
           provider: 'maplerad',
           providerEnvironment: mapleRadService.getEnvironment(),
+          referenceType: 'customer',
           providerCustomerId: eventData.customerId,
         },
       });
@@ -517,6 +541,7 @@ export const mapleradWebhookHandler = async (req: Request, res: Response) => {
         where: {
           provider: 'maplerad',
           providerEnvironment: mapleRadService.getEnvironment(),
+          referenceType: 'customer',
           providerCustomerId: eventData.customerId,
         },
       });
@@ -524,7 +549,7 @@ export const mapleradWebhookHandler = async (req: Request, res: Response) => {
         ? await userRepo.findOne({ where: { id: providerReference.userId } })
         : undefined;
       if (user) {
-        const wallet = await walletRepo.findOne({ where: { user: { id: user.id } } });
+        const wallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency: 'USD' } });
         if (wallet) {
           wallet.usdAccountId = eventData.accountId;
           wallet.usdAccountStatus = 'approved';

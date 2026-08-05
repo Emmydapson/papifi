@@ -10,6 +10,7 @@ import { Transaction } from '../entities/Transaction';
 import { VirtualCard } from '../entities/virtualCard';
 import { AuditLog } from '../entities/AuditLog';
 import { ProviderReference } from '../entities/ProviderReference';
+import { MapleradCustomerRecoveryAttempt } from '../entities/MapleradCustomerRecoveryAttempt';
 import { logger } from './logger';
 import { resolveMapleradConfig, ResolvedMapleradConfig } from '../config/maplerad';
 
@@ -24,15 +25,26 @@ type MapleradCustomer = {
   id: string;
   customer_id?: string;
   first_name?: string;
+  middle_name?: string;
   last_name?: string;
   email?: string;
   country?: string;
+  dob?: string;
+  date_of_birth?: string;
+  dateOfBirth?: string;
+  phone_number?: string;
   tier?: string;
   level?: string | number;
   account_tier?: string | number;
   customer_tier?: string | number;
   phone?: unknown;
 };
+
+type MapleradCustomerRecoveryCode =
+  | 'MAPLERAD_CUSTOMER_NOT_FOUND'
+  | 'MAPLERAD_CUSTOMER_AMBIGUOUS'
+  | 'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH'
+  | 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED';
 
 type MapleradVirtualAccount = {
   id?: string;
@@ -75,6 +87,10 @@ export type MapleradApplicationErrorCode =
   | 'MAPLERAD_INSUFFICIENT_BALANCE'
   | 'MAPLERAD_AUTHENTICATION_FAILED'
   | 'MAPLERAD_CONFIGURATION_ERROR'
+  | 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED'
+  | 'MAPLERAD_CUSTOMER_NOT_FOUND'
+  | 'MAPLERAD_CUSTOMER_AMBIGUOUS'
+  | 'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH'
   | 'MAPLERAD_VALIDATION_ERROR'
   | 'MAPLERAD_CONTRACT_ERROR'
   | 'MAPLERAD_RATE_LIMITED'
@@ -118,11 +134,28 @@ export class MapleradProviderError extends Error {
   }
 }
 
+export class MapleradCustomerRecoveryError extends MapleradProviderError {
+  constructor(
+    public readonly applicationCode: MapleradCustomerRecoveryCode,
+    message: string,
+    public readonly action = 'ADMIN_RECONCILIATION_REQUIRED',
+    providerStatus?: number,
+    providerMessage?: string,
+    requestId?: string,
+    safeResponseBody?: unknown
+  ) {
+    super(message, 'maplerad.customer.recover', providerStatus, providerMessage, requestId, safeResponseBody, 'VALIDATION');
+    this.name = 'MapleradCustomerRecoveryError';
+  }
+}
+
 export const isMapleradProviderError = (error: unknown): error is MapleradProviderError =>
   error instanceof MapleradProviderError;
 
 export const mapleradErrorToHttpStatus = (error: unknown) => {
   if (!isMapleradProviderError(error)) return 502;
+  if (error instanceof MapleradCustomerRecoveryError) return 400;
+  if (mapleradErrorToApplicationCode(error) === 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED') return 400;
   if (mapleradErrorToApplicationCode(error) === 'CUSTOMER_NOT_TIER1') return 400;
   if (error.code === 'VALIDATION') return error.providerStatus === 422 ? 422 : 400;
   if (error.code === 'AUTH') return 502;
@@ -135,7 +168,11 @@ export const mapleradErrorToHttpStatus = (error: unknown) => {
 
 export const mapleradErrorToApplicationCode = (error: unknown): MapleradApplicationErrorCode => {
   if (!isMapleradProviderError(error)) return 'MAPLERAD_UNAVAILABLE';
+  if (error instanceof MapleradCustomerRecoveryError) return error.applicationCode as MapleradApplicationErrorCode;
   const message = String(error.providerMessage || '').toLowerCase();
+  if (error.operation === 'maplerad.customer.create' && message.includes('already enrolled')) {
+    return 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED';
+  }
   if (
     message.includes('tier 1') ||
     message.includes('tier1') ||
@@ -160,12 +197,15 @@ export const mapleradErrorToClientResponse = (error: MapleradProviderError) => {
     ok: false,
     code,
     message:
-      code === 'CUSTOMER_NOT_TIER1'
+      code === 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED'
+        ? 'An existing Maplerad customer must be linked before creating this account.'
+        : code === 'CUSTOMER_NOT_TIER1'
         ? 'Customer must complete Tier 1 KYC before a NGN virtual account can be created.'
         : error.message,
     providerStatus: error.providerStatus,
     providerMessage: error.providerMessage,
     requestId: error.requestId,
+    action: error instanceof MapleradCustomerRecoveryError ? error.action : undefined,
   };
 };
 
@@ -536,12 +576,108 @@ export class MapleRadService {
     return this.normalizeIdentityName(value);
   }
 
+  private normalizeEmail(value?: string | null) {
+    return this.normalize(value);
+  }
+
+  private normalizePhoneForMatch(value?: unknown): string {
+    if (!value) return '';
+    if (typeof value === 'object') {
+      const record = value as any;
+      const countryCode =
+        record.phone_country_code ||
+        record.country_code ||
+        record.countryCode ||
+        record.code ||
+        '';
+      const number = record.phone_number || record.phoneNumber || record.number || record.value || '';
+      return this.normalizePhoneForMatch(`${countryCode}${number}`);
+    }
+    const raw = String(value).trim();
+    const plus = raw.startsWith('+') ? '+' : '';
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return '';
+    if (plus) return `+${digits}`;
+    if (digits.startsWith('234')) return `+${digits}`;
+    if (digits.startsWith('0') && digits.length === 11) return `+234${digits.slice(1)}`;
+    return `+${digits}`;
+  }
+
+  private normalizeDateForMatch(value?: string | null) {
+    if (!value) return '';
+    const trimmed = value.trim();
+    const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const dmy = trimmed.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+    if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+    const date = new Date(trimmed);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  }
+
+  private customerPhone(customer: MapleradCustomer) {
+    return (
+      customer.phone ||
+      customer.phone_number ||
+      (customer as any).phoneNumber ||
+      (customer as any).mobile ||
+      (customer as any).data?.phone
+    );
+  }
+
+  private customerDob(customer: MapleradCustomer) {
+    return customer.dob || customer.date_of_birth || customer.dateOfBirth || (customer as any).date_of_birth || (customer as any).data?.dob;
+  }
+
   private validateCustomerMatch(user: User, customer: MapleradCustomer) {
     const mismatches: string[] = [];
     if (customer.email && this.normalize(customer.email) !== this.normalize(user.email)) mismatches.push('email');
     if (customer.first_name && this.normalizeName(customer.first_name) !== this.normalizeName(user.firstName)) mismatches.push('first_name');
     if (customer.last_name && this.normalizeName(customer.last_name) !== this.normalizeName(user.lastName)) mismatches.push('last_name');
     return { ok: mismatches.length === 0, mismatches };
+  }
+
+  private async verifiedIdentityForUser(user: User, manager?: EntityManager) {
+    const repo = (manager || AppDataSource.manager).getRepository(Profile);
+    const profile = await repo.findOne({ where: { user: { id: user.id } } });
+    const email = this.normalizeEmail(profile?.email || user.email);
+    const phone = this.normalizePhoneForMatch(profile?.phoneNumber || user.phoneNumber);
+    const firstName = this.normalizeName(profile?.firstName || user.firstName);
+    const lastName = this.normalizeName(profile?.lastName || user.lastName);
+    const dob = this.normalizeDateForMatch(profile?.dateOfBirth);
+    const sufficientlyVerified = Boolean(user.isVerified && user.isKYCVerified && email && phone && firstName && lastName);
+    return { sufficientlyVerified, email, phone, firstName, lastName, dob };
+  }
+
+  public async evaluateCustomerIdentityMatch(user: User, customer: MapleradCustomer, manager?: EntityManager) {
+    const identity = await this.verifiedIdentityForUser(user, manager);
+    const customerEmail = this.normalizeEmail(customer.email);
+    const customerPhone = this.normalizePhoneForMatch(this.customerPhone(customer));
+    const customerFirstName = this.normalizeName(customer.first_name);
+    const customerLastName = this.normalizeName(customer.last_name);
+    const customerDob = this.normalizeDateForMatch(this.customerDob(customer));
+    const matchedFields: string[] = [];
+    const mismatches: string[] = [];
+
+    if (!identity.sufficientlyVerified) mismatches.push('verified_identity');
+    if (identity.email && customerEmail && identity.email === customerEmail) matchedFields.push('email');
+    else mismatches.push('email');
+    if (identity.phone && customerPhone && identity.phone === customerPhone) matchedFields.push('phone');
+    else mismatches.push('phone');
+    if (identity.firstName && customerFirstName && identity.firstName === customerFirstName) matchedFields.push('first_name');
+    else mismatches.push('first_name');
+    if (identity.lastName && customerLastName && identity.lastName === customerLastName) matchedFields.push('last_name');
+    else mismatches.push('last_name');
+    if (identity.dob && customerDob) {
+      if (identity.dob === customerDob) matchedFields.push('dob');
+      else mismatches.push('dob');
+    }
+
+    return {
+      exact: mismatches.length === 0,
+      matchedFields,
+      mismatches,
+      identityAvailable: identity.sufficientlyVerified,
+    };
   }
 
   private lockUser(manager: EntityManager, userId: string) {
@@ -559,6 +695,16 @@ export class MapleRadService {
       provider: 'maplerad',
       providerEnvironment: this.environment,
       referenceType: 'customer',
+    };
+  }
+
+  private providerAccountReferenceWhere(userId: string, currency: Currency) {
+    return {
+      userId,
+      provider: 'maplerad',
+      providerEnvironment: this.environment,
+      referenceType: 'account',
+      currency,
     };
   }
 
@@ -607,6 +753,151 @@ export class MapleRadService {
     return AppDataSource.transaction(async (manager) => this.ensureMapleRadCustomerForUser(userId, manager));
   }
 
+  private async persistCustomerReference(
+    manager: EntityManager,
+    user: User,
+    customerId: string,
+    status: string,
+    metadata: Record<string, unknown> = {}
+  ) {
+    const repo = manager.getRepository(ProviderReference);
+    const existingReference = await repo.findOne({ where: this.providerReferenceWhere(user.id) });
+    if (existingReference?.providerCustomerId) return existingReference.providerCustomerId;
+
+    const linkedReference = await repo.findOne({
+      where: {
+        provider: 'maplerad',
+        providerEnvironment: this.environment,
+        referenceType: 'customer',
+        providerCustomerId: customerId,
+      },
+    });
+    if (linkedReference && linkedReference.userId !== user.id) {
+      throw new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH',
+        'The existing Maplerad customer identity could not be safely validated.'
+      );
+    }
+
+    const reference = repo.create({
+      user,
+      userId: user.id,
+      provider: 'maplerad',
+      providerEnvironment: this.environment,
+      referenceType: 'customer',
+      externalReference: customerId,
+      providerCustomerId: customerId,
+      status,
+      metadata: this.sanitizeProviderPayload(metadata),
+    });
+    await repo.save(reference);
+    await manager.getRepository(AuditLog).save(
+      manager.getRepository(AuditLog).create({
+        actorUserId: user.id,
+        targetUserId: user.id,
+        action: status === 'auto_recovered' ? 'MAPLERAD_CUSTOMER_AUTO_RECONCILED' : 'MAPLERAD_CUSTOMER_LINKED',
+        entityType: 'ProviderReference',
+        entityId: reference.id,
+        metadata: this.sanitizeProviderPayload({
+          provider: 'maplerad',
+          providerEnvironment: this.environment,
+          providerCustomerId: customerId,
+          ...metadata,
+        }),
+      })
+    );
+    return customerId;
+  }
+
+  private recoveryErrorFromResult(result: string, providerStatus?: number, providerMessage?: string, requestId?: string) {
+    if (result === 'ambiguous') {
+      return new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_AMBIGUOUS',
+        'Multiple Maplerad customers matched this identity.',
+        'ADMIN_RECONCILIATION_REQUIRED',
+        providerStatus,
+        providerMessage,
+        requestId
+      );
+    }
+    if (result === 'identity_mismatch') {
+      return new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH',
+        'The existing Maplerad customer identity could not be safely validated.',
+        'ADMIN_RECONCILIATION_REQUIRED',
+        providerStatus,
+        providerMessage,
+        requestId
+      );
+    }
+    if (result === 'persistence_failed') {
+      return new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED',
+        'An existing Maplerad customer must be linked before creating this account.',
+        'ADMIN_RECONCILIATION_REQUIRED',
+        providerStatus,
+        providerMessage,
+        requestId
+      );
+    }
+    return new MapleradCustomerRecoveryError(
+      'MAPLERAD_CUSTOMER_NOT_FOUND',
+      'An existing Maplerad customer could not be safely matched.',
+      'ADMIN_RECONCILIATION_REQUIRED',
+      providerStatus,
+      providerMessage,
+      requestId
+    );
+  }
+
+  private async recoverAlreadyEnrolledCustomer(user: User, manager: EntityManager, sourceError: MapleradProviderError) {
+    const cooldown = await this.activeRecoveryCooldown(user.id, 'already_enrolled');
+    if (cooldown) throw this.recoveryErrorFromResult(cooldown.result, sourceError.providerStatus, sourceError.providerMessage, sourceError.requestId);
+
+    try {
+      const result = await this.discoverMatchingMapleradCustomers(user, manager);
+      if (result.exactMatches.length === 0) {
+        const recoveryResult = result.partialMatches.length > 0 ? 'identity_mismatch' : 'not_found';
+        await this.recordRecoveryAttempt(user.id, 'already_enrolled', recoveryResult, {
+          scanned: result.scanned,
+          partialMatches: result.partialMatches.length,
+          requestIds: result.requestIds,
+        });
+        throw this.recoveryErrorFromResult(recoveryResult, sourceError.providerStatus, sourceError.providerMessage, sourceError.requestId);
+      }
+      if (result.exactMatches.length > 1) {
+        await this.recordRecoveryAttempt(user.id, 'already_enrolled', 'ambiguous', {
+          scanned: result.scanned,
+          exactMatches: result.exactMatches.length,
+          requestIds: result.requestIds,
+        });
+        throw this.recoveryErrorFromResult('ambiguous', sourceError.providerStatus, sourceError.providerMessage, sourceError.requestId);
+      }
+
+      const exact = result.exactMatches[0];
+      const customerId = exact.customer.id;
+      return this.persistCustomerReference(manager, user, customerId, 'auto_recovered', {
+        recoveryMethod: 'bounded_customer_pagination',
+        matchedFields: exact.matchedFields,
+        scanned: result.scanned,
+        requestIds: result.requestIds,
+      });
+    } catch (error) {
+      if (error instanceof MapleradCustomerRecoveryError) throw error;
+      await this.recordRecoveryAttempt(user.id, 'already_enrolled', 'provider_unavailable', {
+        message: isMapleradProviderError(error) ? error.providerMessage || error.message : (error as any)?.message,
+      });
+      throw new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED',
+        'An existing Maplerad customer must be linked before creating this account.',
+        'ADMIN_RECONCILIATION_REQUIRED',
+        sourceError.providerStatus,
+        sourceError.providerMessage,
+        sourceError.requestId
+      );
+    }
+  }
+
   private async ensureMapleRadCustomerForUser(userId: string, manager: EntityManager): Promise<string> {
     const user = await this.lockUser(manager, userId);
     if (!user) throw new Error('User not found');
@@ -616,6 +907,19 @@ export class MapleRadService {
     });
 
     if (!reference && this.environment === 'production' && user.mapleradCustomerId) {
+      const legacyCustomer = await this.getCustomerById(user.mapleradCustomerId);
+      const match = this.validateCustomerMatch(user, legacyCustomer);
+      if (!match.ok) {
+        throw new MapleradProviderError(
+          `Legacy Maplerad customer does not match Papafi user: ${match.mismatches.join(', ')}`,
+          'maplerad.customer.validate_legacy',
+          400,
+          'legacy customer mismatch',
+          undefined,
+          { mismatches: match.mismatches },
+          'VALIDATION'
+        );
+      }
       reference = manager.getRepository(ProviderReference).create({
         user,
         userId: user.id,
@@ -627,7 +931,7 @@ export class MapleRadService {
         status: 'legacy_imported',
         metadata: { source: 'user.mapleradCustomerId' },
       });
-      await manager.getRepository(ProviderReference).save(reference);
+      await this.persistCustomerReference(manager, user, user.mapleradCustomerId, 'legacy_imported', { source: 'user.mapleradCustomerId' });
     }
 
     if (reference?.providerCustomerId) {
@@ -647,6 +951,11 @@ export class MapleRadService {
       return reference.providerCustomerId;
     }
 
+    const partialFailureCooldown = await this.activeRecoveryCooldown(user.id, 'customer_create_persistence');
+    if (partialFailureCooldown) {
+      throw this.recoveryErrorFromResult('persistence_failed');
+    }
+
     const payload = {
       first_name: user.firstName,
       last_name: user.lastName,
@@ -661,45 +970,47 @@ export class MapleRadService {
         path: '/customers',
         payload,
       });
-      const safeResponseBody = this.sanitizeProviderPayload(response.data);
       logger.info('maplerad_customer_create_provider_response', {
         operation: 'maplerad.customer.create',
         endpoint: '/customers',
         providerStatus: response.status,
         requestId: this.providerRequestId(response.headers),
-        providerResponseBody: safeResponseBody,
       });
 
       const customer = this.parseCustomerCreateResponse(response.data);
       const customerId = customer.id;
 
-      reference = manager.getRepository(ProviderReference).create({
-        user,
-        userId: user.id,
-        provider: 'maplerad',
-        providerEnvironment: this.environment,
-        referenceType: 'customer',
-        externalReference: customerId,
-        providerCustomerId: customerId,
-        status: 'active',
-      });
-      await manager.getRepository(ProviderReference).save(reference);
-      return customerId;
+      try {
+        return await this.persistCustomerReference(manager, user, customerId, 'active', {
+          source: 'maplerad.customer.create',
+          requestId: this.providerRequestId(response.headers),
+        });
+      } catch (persistenceError) {
+        logger.error('maplerad_customer_reference_persist_failed_after_provider_create', persistenceError as Error, {
+          userId: user.id,
+          providerEnvironment: this.environment,
+          providerCustomerId: customerId,
+        });
+        await this.recordRecoveryAttempt(user.id, 'customer_create_persistence', 'persistence_failed', {
+          providerCustomerId: customerId,
+          requestId: this.providerRequestId(response.headers),
+        });
+        throw new MapleradCustomerRecoveryError(
+          'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED',
+          'An existing Maplerad customer must be linked before creating this account.',
+          'ADMIN_RECONCILIATION_REQUIRED',
+          undefined,
+          'customer reference persistence failed',
+          this.providerRequestId(response.headers)
+        );
+      }
     } catch (error) {
       if (
         isMapleradProviderError(error) &&
         error.code === 'VALIDATION' &&
         String(error.providerMessage || '').toLowerCase().includes('already enrolled')
       ) {
-        throw new MapleradProviderError(
-          'Maplerad customer already exists and must be linked with the admin reconciliation command before wallet creation can continue',
-          'maplerad.customer.create',
-          error.providerStatus,
-          error.providerMessage,
-          error.requestId,
-          error.safeResponseBody,
-          'VALIDATION'
-        );
+        return this.recoverAlreadyEnrolledCustomer(user, manager, error);
       }
       throw error;
     }
@@ -1111,6 +1422,111 @@ export class MapleRadService {
     return [];
   }
 
+  private customerListFromEnvelope(data: any): MapleradCustomer[] {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.data?.customers)) return data.data.customers;
+    if (Array.isArray(data?.data?.items)) return data.data.items;
+    if (Array.isArray(data?.customers)) return data.customers;
+    if (Array.isArray(data?.items)) return data.items;
+    return [];
+  }
+
+  private recoveryLimits() {
+    const pageSize = Math.min(Math.max(Number(process.env.MAPLERAD_CUSTOMER_RECOVERY_PAGE_SIZE || 100), 1), 100);
+    const maxPages = Math.min(Math.max(Number(process.env.MAPLERAD_CUSTOMER_RECOVERY_MAX_PAGES || 20), 1), 20);
+    const maxRecords = Math.min(Math.max(Number(process.env.MAPLERAD_CUSTOMER_RECOVERY_MAX_RECORDS || 2000), 1), 2000);
+    const timeoutMs = Math.min(Math.max(Number(process.env.MAPLERAD_CUSTOMER_RECOVERY_TIMEOUT_MS || 15000), 1000), 15000);
+    const cooldownMs = Math.min(
+      Math.max(Number(process.env.MAPLERAD_CUSTOMER_RECOVERY_COOLDOWN_MS || 15 * 60 * 1000), 60 * 1000),
+      60 * 60 * 1000
+    );
+    return { pageSize, maxPages, maxRecords, timeoutMs, cooldownMs };
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new MapleradProviderError(`${operation} timed out`, operation, undefined, 'recovery timeout', undefined, undefined, 'TIMEOUT')),
+            timeoutMs
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async listCustomersForRecovery() {
+    const limits = this.recoveryLimits();
+    const customers: MapleradCustomer[] = [];
+    const requestIds: string[] = [];
+    for (let page = 1; page <= limits.maxPages && customers.length < limits.maxRecords; page++) {
+      const response = await this.withTimeout(
+        this.requestMapleradRaw<any>({
+          operation: 'maplerad.customer.list_recovery',
+          method: 'GET',
+          path: '/customers',
+          params: { page, page_size: limits.pageSize },
+        }),
+        limits.timeoutMs,
+        'maplerad.customer.list_recovery'
+      );
+      const pageCustomers = this.customerListFromEnvelope(response.data).slice(0, limits.maxRecords - customers.length);
+      customers.push(...pageCustomers);
+      const requestId = this.providerRequestId(response.headers);
+      if (requestId) requestIds.push(requestId);
+      if (pageCustomers.length < limits.pageSize) break;
+    }
+    return { customers, requestIds, limits };
+  }
+
+  private async activeRecoveryCooldown(userId: string, reason: string) {
+    const attempt = await AppDataSource.getRepository(MapleradCustomerRecoveryAttempt).findOne({
+      where: { userId, providerEnvironment: this.environment, reason },
+    });
+    if (!attempt || attempt.expiresAt <= new Date()) return undefined;
+    return attempt;
+  }
+
+  private async recordRecoveryAttempt(
+    userId: string,
+    reason: string,
+    result: string,
+    metadata: Record<string, unknown> = {}
+  ) {
+    const repo = AppDataSource.getRepository(MapleradCustomerRecoveryAttempt);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + this.recoveryLimits().cooldownMs);
+    const existing = await repo.findOne({ where: { userId, providerEnvironment: this.environment, reason } });
+    const attempt = existing || repo.create({ userId, providerEnvironment: this.environment, reason });
+    attempt.result = result;
+    attempt.attemptedAt = now;
+    attempt.expiresAt = expiresAt;
+    attempt.metadata = this.sanitizeProviderPayload(metadata);
+    await repo.save(attempt);
+  }
+
+  async discoverMatchingMapleradCustomers(user: User, manager?: EntityManager) {
+    const { customers, requestIds, limits } = await this.listCustomersForRecovery();
+    const exactMatches: Array<{ customer: MapleradCustomer; matchedFields: string[] }> = [];
+    const partialMatches: Array<{ customerId?: string; mismatches: string[]; matchedFields: string[] }> = [];
+    for (const customer of customers) {
+      const customerId = customer.id || customer.customer_id;
+      if (!customerId) continue;
+      const match = await this.evaluateCustomerIdentityMatch(user, { ...customer, id: customerId }, manager);
+      if (match.exact) exactMatches.push({ customer: { ...customer, id: customerId }, matchedFields: match.matchedFields });
+      else if (match.matchedFields.length > 0) {
+        partialMatches.push({ customerId, mismatches: match.mismatches, matchedFields: match.matchedFields });
+      }
+    }
+    return { exactMatches, partialMatches, scanned: customers.length, requestIds, limits };
+  }
+
   async getCustomerVirtualAccounts(customerId: string): Promise<MapleradVirtualAccount[]> {
     const data: any = await this.requestMaplerad({
       operation: 'maplerad.virtual_account.list_for_customer',
@@ -1131,11 +1547,127 @@ export class MapleRadService {
     });
   }
 
+  private findUniqueProviderVirtualAccount(accounts: MapleradVirtualAccount[], currency: Currency) {
+    const matches = accounts.filter((account) => {
+      const accountCurrency = String(account.currency || '').toUpperCase();
+      return accountCurrency === currency && Boolean(this.accountId(account));
+    });
+    if (matches.length > 1) {
+      throw new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED',
+        `Multiple Maplerad ${currency} accounts require admin reconciliation.`,
+        'ADMIN_RECONCILIATION_REQUIRED'
+      );
+    }
+    return matches[0];
+  }
+
   private applyVirtualAccountToWallet(wallet: Wallet, data: MapleradVirtualAccount, currency: Currency) {
     wallet.mapleradAccountId = data.id || data.account_id;
     wallet.accountNumber = data.account_number;
     wallet.bankName = data.bank_name || data.bank?.name;
     wallet.currency = currency;
+    return wallet;
+  }
+
+  private walletResponse(wallet: Wallet) {
+    return {
+      id: wallet.id,
+      currency: wallet.currency,
+      availableBalance: Number(wallet.availableBalance || 0),
+      pendingBalance: Number(wallet.pendingBalance || 0),
+      ledgerBalance: Number(wallet.ledgerBalance || wallet.balance || 0),
+      accountNumber: wallet.accountNumber ? this.maskAccountNumber(wallet.accountNumber) : undefined,
+      bankName: wallet.bankName,
+      status: wallet.usdAccountStatus && wallet.currency === 'USD' ? wallet.usdAccountStatus : 'active',
+      providerEnvironment: this.environment,
+    };
+  }
+
+  public formatWalletForClient(wallet: Wallet) {
+    return this.walletResponse(wallet);
+  }
+
+  private maskAccountNumber(accountNumber?: string | null) {
+    const value = String(accountNumber || '').replace(/\D/g, '');
+    if (!value) return undefined;
+    return `${'*'.repeat(Math.max(0, value.length - 4))}${value.slice(-4)}`;
+  }
+
+  private accountId(data: MapleradVirtualAccount) {
+    return data.id || data.account_id || data.reference;
+  }
+
+  private async upsertWalletAndAccountReference(
+    manager: EntityManager,
+    user: User,
+    customerId: string,
+    data: MapleradVirtualAccount,
+    currency: Currency
+  ) {
+    const walletRepo = manager.getRepository(Wallet);
+    const referenceRepo = manager.getRepository(ProviderReference);
+    const existingWallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
+    const existingReference = await referenceRepo.findOne({ where: this.providerAccountReferenceWhere(user.id, currency) });
+    const providerAccountId = this.accountId(data);
+    if (!providerAccountId) {
+      throw new MapleradProviderError(
+        'Maplerad virtual account response did not include an account id',
+        'maplerad.virtual_account.persist',
+        undefined,
+        'missing account id',
+        undefined,
+        this.sanitizeProviderPayload(data),
+        'SCHEMA'
+      );
+    }
+    if (existingWallet?.mapleradAccountId && existingWallet.mapleradAccountId !== providerAccountId) {
+      throw new MapleradProviderError(
+        `Local ${currency} wallet is linked to a different Maplerad account`,
+        'maplerad.virtual_account.persist',
+        409,
+        'local wallet account conflict',
+        undefined,
+        { currency },
+        'VALIDATION'
+      );
+    }
+    if (existingReference?.providerAccountId && existingReference.providerAccountId !== providerAccountId) {
+      throw new MapleradProviderError(
+        `Local ${currency} provider reference is linked to a different Maplerad account`,
+        'maplerad.virtual_account.persist',
+        409,
+        'local provider reference account conflict',
+        undefined,
+        { currency },
+        'VALIDATION'
+      );
+    }
+
+    const wallet = this.applyVirtualAccountToWallet(existingWallet || walletRepo.create({ user }), data, currency);
+    if (currency === 'USD') {
+      wallet.usdAccountId = providerAccountId;
+      wallet.usdAccountStatus = String(data.status || existingWallet?.usdAccountStatus || 'pending') as any;
+    }
+    await walletRepo.save(wallet);
+
+    const savedReference = existingReference || referenceRepo.create({
+      user,
+      userId: user.id,
+      provider: 'maplerad',
+      providerEnvironment: this.environment,
+      referenceType: 'account',
+      currency,
+    });
+    savedReference.providerCustomerId = customerId;
+    savedReference.externalReference = providerAccountId;
+    savedReference.providerAccountId = providerAccountId;
+    savedReference.accountNumber = data.account_number;
+    savedReference.bankName = data.bank_name || data.bank?.name;
+    savedReference.currency = currency;
+    savedReference.status = String(data.status || 'active');
+    savedReference.metadata = { accountStatus: data.status };
+    await referenceRepo.save(savedReference);
     return wallet;
   }
 
@@ -1162,7 +1694,7 @@ export class MapleRadService {
       const walletRepo = manager.getRepository(Wallet);
       const referenceRepo = manager.getRepository(ProviderReference);
       const existingWallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
-      let reference = await referenceRepo.findOne({ where: this.providerReferenceWhere(user.id) });
+      let reference = await referenceRepo.findOne({ where: this.providerAccountReferenceWhere(user.id, currency) });
       if (existingWallet?.accountNumber && existingWallet?.mapleradAccountId && reference?.providerAccountId) return existingWallet;
 
       const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
@@ -1179,7 +1711,7 @@ export class MapleRadService {
           'VALIDATION'
         );
       }
-      reference = await referenceRepo.findOne({ where: this.providerReferenceWhere(user.id) });
+      reference = await referenceRepo.findOne({ where: this.providerAccountReferenceWhere(user.id, currency) });
       if (reference?.providerAccountId && reference.accountNumber) {
         const wallet = this.applyVirtualAccountToWallet(
           existingWallet || walletRepo.create({ user }),
@@ -1197,7 +1729,7 @@ export class MapleRadService {
       }
 
       const providerAccounts = await this.getCustomerVirtualAccounts(customerId);
-      let data = this.findProviderVirtualAccount(providerAccounts, currency);
+      let data = this.findUniqueProviderVirtualAccount(providerAccounts, currency);
 
       if (!data) {
         const payload = { customer_id: customerId, currency, preferred_bank: process.env.MAPLERAD_NGN_PREFERRED_BANK };
@@ -1222,66 +1754,58 @@ export class MapleRadService {
         );
       }
 
-      const wallet = this.applyVirtualAccountToWallet(existingWallet || walletRepo.create({ user }), data, currency);
-      await walletRepo.save(wallet);
-
-      const savedReference = reference || referenceRepo.create({
-        user,
-        userId: user.id,
-        provider: 'maplerad',
-        providerEnvironment: this.environment,
-        referenceType: 'customer',
-        providerCustomerId: customerId,
-        status: 'active',
-      });
-      savedReference.providerCustomerId = customerId;
-      savedReference.externalReference = customerId;
-      savedReference.providerAccountId = data.id || data.account_id;
-      savedReference.accountNumber = data.account_number;
-      savedReference.bankName = data.bank_name || data.bank?.name;
-      savedReference.currency = currency;
-      savedReference.status = String(data.status || 'active');
-      savedReference.metadata = { accountStatus: data.status };
-      await referenceRepo.save(savedReference);
-
-      return data;
+      return this.upsertWalletAndAccountReference(manager, user, customerId, data, currency);
     });
   }
 
-async createUsdVirtualAccount(userId: string): Promise<any> {
-  const user = await this.userRepo.findOne({ where: { id: userId } });
-  if (!user) throw new Error('User not found');
+  async createUsdVirtualAccount(userId: string): Promise<Wallet> {
+    return AppDataSource.transaction(async (manager) => {
+      const user = await this.lockUser(manager, userId);
+      if (!user) throw new Error('User not found');
 
-  const customerId = await this.ensureMapleRadCustomer(user.id);
+      const currency: Currency = 'USD';
+      const walletRepo = manager.getRepository(Wallet);
+      const referenceRepo = manager.getRepository(ProviderReference);
+      const existingWallet = await walletRepo.findOne({ where: { user: { id: user.id }, currency } });
+      const existingReference = await referenceRepo.findOne({ where: this.providerAccountReferenceWhere(user.id, currency) });
+      if (existingWallet?.mapleradAccountId && existingReference?.providerAccountId) return existingWallet;
 
-  const payload = {
-    customer_id: customerId,
-    meta: {
-      // Maplerad requires onboarding metadata
-      // adjust according to their docs
-      first_name: user.firstName,
-      last_name: user.lastName,
-      email: user.email,
-      country: 'NG', // or 'US' if you have users abroad
-    },
-  };
+      const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
+      const providerAccounts = await this.getCustomerVirtualAccounts(customerId);
+      let data = this.findUniqueProviderVirtualAccount(providerAccounts, currency);
 
-  const res: AxiosResponse = await this.http.post(
-      '/collections/virtual-account/usd',
-      payload,
-      { headers: this.getSecretHeaders() }
-    )
-  
+      if (!data) {
+        data = await this.requestMaplerad<MapleradVirtualAccount>({
+          operation: 'maplerad.virtual_account.create_usd',
+          method: 'POST',
+          path: '/collections/virtual-account/usd',
+          payload: {
+            customer_id: customerId,
+            meta: {
+              first_name: user.firstName,
+              last_name: user.lastName,
+              email: user.email,
+              country: 'NG',
+            },
+          },
+        });
+      }
 
-  const data = this.unwrap<MapleradVirtualAccount>(res);
+      if (!this.accountId(data)) {
+        throw new MapleradProviderError(
+          'USD account request did not return an account id or reference',
+          'maplerad.virtual_account.create_usd',
+          undefined,
+          'missing account id',
+          undefined,
+          this.sanitizeProviderPayload(data),
+          'SCHEMA'
+        );
+      }
 
-  // data.reference means "account creation request started"
-  if (!data?.reference) {
-    throw new Error('USD account request did not return a reference');
+      return this.upsertWalletAndAccountReference(manager, user, customerId, data, currency);
+    });
   }
-
-  return data;
-}
 
 async getUsdAccountRails(accountId: string): Promise<any> {
   if (!accountId) throw new Error('USD Account ID is required');

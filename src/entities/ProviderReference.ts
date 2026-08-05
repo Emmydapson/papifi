@@ -3,9 +3,15 @@ import { User } from './User';
 
 export type ProviderEnvironment = 'sandbox' | 'production';
 
-@Index(['provider', 'providerEnvironment', 'providerCustomerId'], { unique: true })
+@Index(['provider', 'providerEnvironment', 'referenceType', 'providerCustomerId'], {
+  unique: true,
+  where: '"providerCustomerId" IS NOT NULL AND "referenceType" = \'customer\'',
+})
 @Index(['userId', 'provider', 'providerEnvironment', 'currency'], { unique: true })
-@Index(['userId', 'provider', 'providerEnvironment', 'referenceType'], { unique: true })
+@Index(['userId', 'provider', 'providerEnvironment', 'referenceType'], {
+  unique: true,
+  where: '"referenceType" = \'customer\'',
+})
 @Index(['provider', 'providerEnvironment', 'referenceType', 'externalReference'], { unique: true })
 @Entity('provider_reference')
 export class ProviderReference {

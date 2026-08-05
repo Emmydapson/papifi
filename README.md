@@ -76,6 +76,34 @@ Development, test, and staging default to sandbox. Production defaults to produc
 
 Changing provider environments does not migrate provider customer IDs, wallet IDs, account numbers, KYC state, or webhook event IDs. Sandbox and production provider IDs are stored separately as `maplerad:sandbox` and `maplerad:production` references.
 
+### Maplerad Customer And Wallet Recovery
+
+Papafi stores one environment-specific Maplerad customer `ProviderReference` per user and separate account `ProviderReference` rows per currency. NGN and USD wallets reuse the same provider customer ID but have distinct wallet rows and provider account IDs.
+
+When `POST /customers` succeeds, the returned customer ID is persisted before account creation continues. If Maplerad returns `customer is already enrolled` and Papafi has no local customer reference, onboarding runs bounded automatic recovery through documented `GET /customers?page=...&page_size=...` pagination. Automatic attachment happens only when exactly one provider customer matches the authenticated user's verified email, normalized phone, first name, and last name; DOB must also match when both sides provide it. No closest match is used.
+
+Recovery limits are controlled by:
+
+```text
+MAPLERAD_CUSTOMER_RECOVERY_PAGE_SIZE=100
+MAPLERAD_CUSTOMER_RECOVERY_MAX_PAGES=20
+MAPLERAD_CUSTOMER_RECOVERY_MAX_RECORDS=2000
+MAPLERAD_CUSTOMER_RECOVERY_TIMEOUT_MS=15000
+MAPLERAD_CUSTOMER_RECOVERY_COOLDOWN_MS=900000
+```
+
+Code caps these values even if higher values are configured. Failed, ambiguous, mismatched, outage, and partial-persistence recovery outcomes are cached briefly to avoid repeated full provider scans.
+
+Manual tools remain for exceptional recovery only:
+
+```bash
+npm run maplerad:reconcile-customer -- --email user@example.com
+npm run maplerad:reconcile-customer -- --email user@example.com --maplerad-customer-id cus_... --confirm
+npm run maplerad:reconcile-wallets -- --user-id <papafi-user-id> --environment sandbox
+```
+
+These commands dry-run by default and mask identity/account data in output.
+
 ### Maplerad Webhooks
 
 Maplerad webhook signing is separate from API authentication:

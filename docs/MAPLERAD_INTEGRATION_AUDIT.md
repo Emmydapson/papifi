@@ -36,8 +36,8 @@ Official documentation reviewed:
 | Request timeout | Provider service | All provider paths | n/a | n/a | Bearer secret | Timeout within 15s | n/a | Required for readiness | 15s axios timeout patched |
 | Retries | Provider service | All provider paths | n/a | n/a | Bearer secret | Retry only transient errors | n/a | Not endpoint-specific | Patched to retry network/5xx only, not 4xx |
 | Request IDs | Provider service | All provider paths | n/a | n/a | Bearer secret + `X-Request-Id` | Provider request id if returned | n/a | Operational requirement | Patched generated `X-Request-Id` |
-| Create customer | `POST /api/wallet/create/{userId}`, cards, withdrawal | `/customers` | POST | `first_name`, `last_name`, `email`, `country` | Bearer secret | `data.id` or `id` | n/a | Current | No endpoint fix; duplicate handling remains local persistence by `mapleradCustomerId` |
-| Retrieve/list customer | Readiness script | `/customers?page=1&page_size=1` | GET | Query only | Bearer secret | JSON object/list envelope | n/a | Current | Added readiness check |
+| Create customer | `POST /api/wallet/create/{userId}`, cards, withdrawal | `/customers` | POST | `first_name`, `last_name`, `email`, `country` | Bearer secret | `data.id` or `id` | n/a | Current | Customer ID is persisted transactionally before account creation continues |
+| Retrieve/list customer | Readiness and recovery scripts; automatic already-enrolled recovery | `/customers?page=1&page_size=...` | GET | Query only; bounded pagination | Bearer secret | JSON object/list envelope | n/a | Current | Used only for bounded exact-match recovery; no unsupported filters assumed |
 | Update/upgrade customer tier 1 | `POST /api/kyc/bvn` after BVN success | `/customers/upgrade/tier1` | PATCH | `customer_id`, `dob`, `identification_number`, `phone`, `address`, optional `photo` | Bearer secret | Provider tier response, followed by customer retrieve | n/a | Current | Patched: reuses existing customer, upgrades Tier 1, then retrieves customer tier before marking local KYC complete |
 | Customer tier 2 | Not implemented | `/customers/upgrade/tier2` | PATCH | `customer_id`, `identity`, `photo` | Bearer secret | Provider tier response | n/a | Current | Not implemented; no speculative patch |
 | Full customer enroll | Not implemented | `/customers/enroll` | POST | Full customer/KYC payload | Bearer secret | `id` | n/a | Current | Not implemented; consider only when replacing two-step flow |
@@ -60,6 +60,8 @@ Official documentation reviewed:
 ## Security Notes
 
 - No provider secret, BVN, PAN, CVV, bearer token, webhook secret, or full sensitive provider payload should be printed by readiness or smoke tests.
+- Automatic customer recovery attaches a Maplerad customer only when exactly one provider customer matches verified Papafi email, phone, first name, and last name. Ambiguous, partial, missing, or conflicting matches return admin reconciliation errors.
+- NGN and USD accounts are stored as separate account ProviderReference rows and never as currency fields on the customer reference.
 - The live readiness script does not perform transfers, deposits, card funding, card withdrawals, or unauthorized identity checks.
 - The staging smoke test skips live KYC and provider-affecting wallet/account creation unless `MAPLERAD_LIVE_TESTS_ENABLED=true`.
 - Real-money movement remains blocked pending explicit authorization and successful controlled production checks.
