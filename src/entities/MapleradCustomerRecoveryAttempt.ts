@@ -18,6 +18,9 @@ export class MapleradCustomerRecoveryAttempt {
   @Column()
   reason!: string;
 
+  @Column({ nullable: true })
+  identityFingerprint?: string;
+
   @Column({ type: 'timestamp' })
   attemptedAt!: Date;
 

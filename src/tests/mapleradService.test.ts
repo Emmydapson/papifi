@@ -939,6 +939,22 @@ test('bounded customer recovery pagination stops when a page is shorter than pag
   assert.deepEqual(result.requestIds, ['req-page-1', 'req-page-2']);
 });
 
+test('customer recovery list parser supports documented wrappers and rejects malformed responses', () => {
+  const service = serviceWithMockedRequest(async () => null);
+  assert.deepEqual((service as any).customerListFromEnvelope({ data: { customers: [{ id: 'cus_data_customers' }] } })[0].id, 'cus_data_customers');
+  assert.deepEqual((service as any).customerListFromEnvelope({ customers: [{ id: 'cus_customers' }] })[0].id, 'cus_customers');
+  assert.deepEqual((service as any).customerListFromEnvelope({ result: [{ id: 'cus_result' }] })[0].id, 'cus_result');
+  assert.deepEqual((service as any).customerListFromEnvelope({ result: { customers: [{ id: 'cus_result_customers' }] } })[0].id, 'cus_result_customers');
+  assert.throws(
+    () => (service as any).customerListFromEnvelope({ data: { total: 1 } }),
+    (error: any) => {
+      assert.equal(isMapleradProviderError(error), true);
+      assert.equal(error.code, 'SCHEMA');
+      return true;
+    }
+  );
+});
+
 test('customer recovery identity matching requires verified email phone and names', async () => {
   const service = serviceWithMockedRequest(async () => null, false);
   const user: any = {
@@ -975,6 +991,94 @@ test('customer recovery identity matching requires verified email phone and name
   assert.deepEqual(exact.matchedFields.sort(), ['email', 'first_name', 'last_name', 'phone'].sort());
   assert.equal(partial.exact, false);
   assert.deepEqual(partial.mismatches, ['last_name']);
+});
+
+test('customer recovery allows missing optional DOB but rejects conflicting DOB', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const user: any = {
+    id: 'user-1',
+    email: 'ada@example.com',
+    phoneNumber: '+2348012345678',
+    firstName: 'Ada',
+    lastName: 'Okafor',
+    isVerified: true,
+    isKYCVerified: true,
+  };
+  const managerWithDob: any = {
+    getRepository: () => ({
+      findOne: async () => ({ dateOfBirth: '1990-01-31' }),
+    }),
+  };
+
+  const missingDob = await service.evaluateCustomerIdentityMatch(user, {
+    id: 'cus_1',
+    email: 'ada@example.com',
+    phone: '+2348012345678',
+    first_name: 'Ada',
+    last_name: 'Okafor',
+  } as any, managerWithDob);
+  const conflictingDob = await service.evaluateCustomerIdentityMatch(user, {
+    id: 'cus_2',
+    email: 'ada@example.com',
+    phone: '+2348012345678',
+    first_name: 'Ada',
+    last_name: 'Okafor',
+    dob: '1991-01-31',
+  } as any, managerWithDob);
+
+  assert.equal(missingDob.exact, true);
+  assert.equal(conflictingDob.exact, false);
+  assert.deepEqual(conflictingDob.mismatches, ['dob']);
+});
+
+test('missing verified profile returns profile-incomplete during exact recovery', async () => {
+  const service = serviceWithMockedRequest(async () => null, true);
+  const user: any = {
+    id: 'user-1',
+    email: 'ada@example.com',
+    phoneNumber: '',
+    firstName: 'Ada',
+    lastName: 'Okafor',
+    isVerified: true,
+    isKYCVerified: true,
+  };
+  const manager: any = {
+    getRepository: () => ({ findOne: async () => null }),
+  };
+  (service as any).recordRecoveryAttempt = async () => undefined;
+
+  await assert.rejects(
+    () => (service as any).recoverAlreadyEnrolledCustomer(
+      user,
+      manager,
+      new MapleradProviderError('already enrolled', 'maplerad.customer.create', 400, 'customer is already enrolled', 'req', {}, 'VALIDATION')
+    ),
+    (error: any) => {
+      assert.equal(error instanceof MapleradCustomerRecoveryError, true);
+      assert.equal(error.applicationCode, 'MAPLERAD_CUSTOMER_RECOVERY_PROFILE_INCOMPLETE');
+      return true;
+    }
+  );
+});
+
+test('recovery cooldown is reused only for unchanged identity fingerprint and parser version', async () => {
+  const service = serviceWithMockedRequest(async () => null);
+  const originalGetRepository = AppDataSource.getRepository.bind(AppDataSource);
+  const future = new Date(Date.now() + 60000);
+  try {
+    (AppDataSource as any).getRepository = () => ({
+      findOne: async () => ({
+        result: 'not_found',
+        expiresAt: future,
+        identityFingerprint: 'same-fingerprint',
+        metadata: { parserVersion: (service as any).recoveryParserVersion() },
+      }),
+    });
+    assert.ok(await (service as any).activeRecoveryCooldown('user-1', 'already_enrolled', 'same-fingerprint'));
+    assert.equal(await (service as any).activeRecoveryCooldown('user-1', 'already_enrolled', 'new-fingerprint'), undefined);
+  } finally {
+    (AppDataSource as any).getRepository = originalGetRepository;
+  }
 });
 
 test('already enrolled recovery persists exactly one matched customer and continues', async () => {

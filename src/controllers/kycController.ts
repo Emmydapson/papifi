@@ -9,6 +9,7 @@ import {
 } from '../services/mapleradService';
 import { auditService } from '../services/auditService';
 import { logger } from '../services/logger';
+import { walletProvisioningService } from '../services/walletProvisioningService';
 import {
   bvnFailureMetadata,
   bvnFingerprint,
@@ -81,12 +82,17 @@ class KYCController {
           }
         );
         await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'APPROVED' });
+        const walletProvisioning = await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId);
         return res.status(200).json({
           message: 'BVN verification passed.',
           code: 'BVN_VERIFIED',
           status: 'PASSED',
           verificationId: existingPassed.id,
           reused: true,
+          walletProvisioning: {
+            currency: 'NGN',
+            state: walletProvisioning.state,
+          },
         });
       }
 
@@ -157,10 +163,20 @@ class KYCController {
         req,
       });
 
+      const walletProvisioning = passed
+        ? await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId)
+        : undefined;
+
       return res.status(200).json({
         message: passed ? 'BVN verification passed.' : 'BVN verification failed.',
         code: providerResult.applicationCode,
         status: verification.status,
+        walletProvisioning: walletProvisioning
+          ? {
+              currency: 'NGN',
+              state: walletProvisioning.state,
+            }
+          : undefined,
       });
     } catch (error: any) {
       if (isMapleradProviderError(error)) {

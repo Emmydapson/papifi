@@ -17,6 +17,7 @@ import { requestLogger } from './middlewares/requestLogger';
 import { validateEnv } from './config/env';
 import { logger } from './services/logger';
 import { startReconciliationWorker } from './workers/reconciliationWorker';
+import { startWalletProvisioningWorker } from './workers/walletProvisioningWorker';
 import { registerApiDocs } from './apiDocs';
 import { mapleradStartupSummary } from './config/maplerad';
 import { getSchemaReadiness } from './services/schemaReadiness';
@@ -124,6 +125,7 @@ app.use(errorHandler);
 AppDataSource.initialize()
   .then(() => {
     startReconciliationWorker();
+    startWalletProvisioningWorker();
     app.listen(PORT, '0.0.0.0', () => {
       logger.info('server_started', { host: '0.0.0.0', port: PORT });
     });

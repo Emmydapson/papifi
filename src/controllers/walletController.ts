@@ -13,6 +13,7 @@ import { auditService } from '../services/auditService';
 import { limitService } from '../services/limitService';
 import { riskService } from '../services/riskService';
 import { logger } from '../services/logger';
+import { walletProvisioningService } from '../services/walletProvisioningService';
 
 const router = Router();
 let mapleRadServiceInstance: MapleRadService | undefined;
@@ -112,7 +113,18 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
     const existing = await walletRepo.findOne({ where: { user: { id: userId }, currency: 'NGN' } });
     if (existing) return res.status(200).json({ ok: true, wallet: mapleRadService.formatWalletForClient(existing) });
 
-    await mapleRadService.createVirtualAccountForUser(userId, 'NGN');
+    const result = await walletProvisioningService.provisionDefaultNgnWallet(userId, {
+      forceRetry: true,
+      processNow: true,
+      actorUserId: req.user?.id,
+    });
+    if (!result.wallet && result.job.state !== 'PROVISIONED') {
+      return res.status(result.job.state === 'RECONCILIATION_REQUIRED' ? 400 : 202).json({
+        ok: true,
+        wallet: null,
+        walletProvisioning: walletProvisioningService.publicStatus(result.job),
+      });
+    }
     const wallet = await walletRepo.findOne({ where: { user: { id: userId }, currency: 'NGN' } });
     await auditService.log({ actorUserId: userId, targetUserId: userId, action: 'WALLET_CREATED', entityType: 'Wallet', entityId: wallet?.id, req });
     return res.status(201).json({ ok: true, wallet: wallet ? mapleRadService.formatWalletForClient(wallet) : null });
@@ -121,6 +133,20 @@ router.post('/create/:userId', async (req: Request, res: Response) => {
       return res.status(mapleradErrorToHttpStatus(err)).json(mapleradErrorToClientResponse(err));
     }
     return res.status(400).json({ ok: false, message: err?.message || 'error' });
+  }
+});
+
+router.get('/provisioning-status/:userId?', async (req: Request, res: Response) => {
+  try {
+    const requestedUserId = req.params.userId || req.user?.id;
+    if (!requestedUserId) return res.status(401).json({ ok: false, message: 'Authentication required' });
+    if (req.params.userId) {
+      const authorization = requestedUserIdForOwnedRoute(req);
+      if (!authorization.ok) return res.status(authorization.status).json({ ok: false, message: authorization.message });
+    }
+    return res.json(await walletProvisioningService.getStatus(requestedUserId, 'NGN'));
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, message: err?.message || 'error' });
   }
 });
 
@@ -149,6 +175,19 @@ router.get('/balance/:userId', async (req: Request, res: Response) => {
     const wallets = await walletRepo.find({ where: { user: { id: userId } }, order: { currency: 'ASC' } });
     if (wallets.length > 0) {
       return res.json({ ok: true, walletState: 'PROVISIONED', wallets: wallets.map((wallet) => mapleRadService.formatWalletForClient(wallet)) });
+    }
+
+    const provisioningStatus = await walletProvisioningService.getStatus(userId, 'NGN');
+    if (['PENDING', 'PROCESSING', 'RETRYING'].includes(provisioningStatus.state)) {
+      return res.json({ ok: true, walletState: 'PENDING_PROVISIONING', wallets: [] });
+    }
+    if (provisioningStatus.state === 'RECONCILIATION_REQUIRED') {
+      return res.json({ ok: true, walletState: 'RECONCILIATION_REQUIRED', wallets: [] });
+    }
+
+    const user = await userRepo.findOne({ where: { id: userId } });
+    if (!user?.isKYCVerified || user.accountTier !== 'APPROVED') {
+      return res.json({ ok: true, walletState: 'KYC_REQUIRED', wallets: [] });
     }
 
     const providerReferences = await providerReferenceRepo.find({

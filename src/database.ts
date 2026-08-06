@@ -15,6 +15,7 @@ import { AuditLog } from './entities/AuditLog';
 import { RiskFlag } from './entities/RiskFlag';
 import { ProviderReference } from './entities/ProviderReference';
 import { MapleradCustomerRecoveryAttempt } from './entities/MapleradCustomerRecoveryAttempt';
+import { WalletProvisioningJob } from './entities/WalletProvisioningJob';
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
@@ -23,7 +24,7 @@ export const AppDataSource = new DataSource({
   username: process.env.DB_USERNAME,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  entities: [User, Wallet, Profile, VirtualCard, Transaction, KycVerification, WebhookEvent, LedgerAccount, LedgerJournal, LedgerEntry, AuditLog, RiskFlag, ProviderReference, MapleradCustomerRecoveryAttempt ],
+  entities: [User, Wallet, Profile, VirtualCard, Transaction, KycVerification, WebhookEvent, LedgerAccount, LedgerJournal, LedgerEntry, AuditLog, RiskFlag, ProviderReference, MapleradCustomerRecoveryAttempt, WalletProvisioningJob ],
   migrations: [path.join(__dirname, 'migrations', '*.{ts,js}')],  // Add migration path
   synchronize: false, // Set to false in production
   logging: process.env.NODE_ENV !== 'production',

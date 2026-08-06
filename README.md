@@ -92,7 +92,7 @@ MAPLERAD_CUSTOMER_RECOVERY_TIMEOUT_MS=15000
 MAPLERAD_CUSTOMER_RECOVERY_COOLDOWN_MS=900000
 ```
 
-Code caps these values even if higher values are configured. Failed, ambiguous, mismatched, outage, and partial-persistence recovery outcomes are cached briefly to avoid repeated full provider scans.
+Code caps these values even if higher values are configured. Failed, ambiguous, mismatched, outage, and partial-persistence recovery outcomes are cached briefly to avoid repeated full provider scans. Recovery cooldowns include a safe fingerprint of normalized email, Nigerian E.164 phone, first/last name, optional DOB, provider environment, and parser version, so corrected profile data or parser deployments can retry immediately without deleting recovery rows.
 
 Manual tools remain for exceptional recovery only:
 
@@ -103,6 +103,27 @@ npm run maplerad:reconcile-wallets -- --user-id <papafi-user-id> --environment s
 ```
 
 These commands dry-run by default and mask identity/account data in output.
+
+### Default NGN Wallet Provisioning
+
+After the user completes the standard onboarding sequence, Papafi automatically enqueues default NGN wallet provisioning:
+
+```text
+Register -> OTP -> PIN -> KYC -> walletProvisioning=PENDING -> poll provisioning/balance state -> walletState=PROVISIONED
+```
+
+The frontend should not call `POST /api/wallet/create/{userId}` during normal onboarding. That endpoint remains an idempotent retry/repair endpoint for backwards compatibility and support workflows. USD virtual accounts remain optional and user-triggered through `POST /api/wallet/create-usd/{userId}`.
+
+Provisioning is tracked durably in `wallet_provisioning_job` with states `PENDING`, `PROCESSING`, `PROVISIONED`, `RETRYING`, `RECONCILIATION_REQUIRED`, and `FAILED`. Poll `GET /api/wallet/provisioning-status` or `GET /api/wallet/balance/{userId}` after KYC success.
+
+Admin/support visibility:
+
+```text
+GET /api/admin/wallet-provisioning
+GET /api/admin/wallet-provisioning/{id}
+POST /api/admin/wallet-provisioning/{id}/retry
+POST /api/admin/wallet-provisioning/{id}/mark-manual-review
+```
 
 ### Maplerad Webhooks
 
@@ -211,6 +232,7 @@ Admin/risk endpoints:
 - `GET /api/admin/audit-logs`
 - `GET /api/admin/risk-flags`
 - `GET /api/admin/reconciliation`
+- `GET /api/admin/wallet-provisioning`
 - `POST /api/admin/transactions/:id/manual-review`
 - `GET /api/admin/users/:userId/wallet-summary`
 

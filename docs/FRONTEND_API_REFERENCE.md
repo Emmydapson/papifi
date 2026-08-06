@@ -178,7 +178,7 @@ Papafi currently supports Maplerad BVN verification, Maplerad Tier 1 customer up
 | Method | Path | Auth | Body | Success |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/kyc/start` | Bearer | None | Returns provider `maplerad` and document types. |
-| `POST` | `/api/kyc/bvn` | Bearer | `bvn` as 11 digits; optional `dateOfBirth`, `phoneNumber`, `address` object, `city`, `state`, `country`, `postalCode`, `photo` for Tier 1 upgrade | `{ "message": "BVN verification passed.", "status": "PASSED" }` or failed status. |
+| `POST` | `/api/kyc/bvn` | Bearer | `bvn` as 11 digits; optional `dateOfBirth`, `phoneNumber`, `address` object, `city`, `state`, `country`, `postalCode`, `photo` for Tier 1 upgrade | Returns KYC status and `walletProvisioning` state when BVN passes. |
 | `POST` | `/api/kyc/documents` | Bearer | `documentType`, optional `documentNumber`, `frontImageUrl`, `backImageUrl`, `selfieImageUrl`, `issuedCountry`, `expiresAt` | `{ "message": "KYC document metadata submitted.", "verificationId": "<uuid>", "status": "PENDING" }` |
 | `GET` | `/api/kyc/status` | Bearer | None | Returns user KYC verification records. |
 
@@ -192,13 +192,25 @@ Use the authenticated user's `userId` from OTP verification, login, or JWT-assoc
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/wallet/create/{userId}` | Bearer | `userId` path | Creates or returns an existing NGN wallet and virtual account. |
 | `POST` | `/api/wallet/create-usd/{userId}` | Bearer | `userId` path | Requests USD virtual account creation with Maplerad. |
+| `GET` | `/api/wallet/provisioning-status` | Bearer | None | Returns the authenticated user's default NGN provisioning state. |
+| `GET` | `/api/wallet/provisioning-status/{userId}` | Bearer | `userId` path | Same response for owner/admin support views. |
 | `GET` | `/api/wallet/balance/{userId}` | Bearer | `userId` path | Returns all wallets for the user. |
 
 Wallet balance responses include `walletState`:
 
 - `PROVISIONED` when local wallets exist.
+- `PENDING_PROVISIONING` when the default NGN wallet job is pending, processing, or retrying.
+- `KYC_REQUIRED` when the user has no wallet and has not completed eligible KYC.
 - `NOT_PROVISIONED` when no local or provider-reference evidence exists.
 - `RECONCILIATION_REQUIRED` when a provider customer/account reference exists but local wallet rows are incomplete.
+
+Normal onboarding flow:
+
+```text
+Register -> OTP -> PIN -> KYC -> walletProvisioning=PENDING -> poll provisioning/balance state -> walletState=PROVISIONED
+```
+
+The frontend should not normally call `POST /api/wallet/create/{userId}` after KYC. That route is retained for idempotent retry/repair and support workflows. USD remains optional and user-triggered.
 
 Wallet account numbers are masked and provider payloads are never returned.
 
@@ -351,6 +363,10 @@ Admin routes require `Authorization: Bearer <jwt>` and `adminMiddleware`, so the
 | `GET` | `/api/admin/audit-logs` | `page`, `limit` | Paginated sanitized audit log list. |
 | `GET` | `/api/admin/risk-flags` | `page`, `limit` | Paginated open risk flags. |
 | `GET` | `/api/admin/reconciliation` | `thresholdMinutes` | Stale provider transactions needing reconciliation. |
+| `GET` | `/api/admin/wallet-provisioning` | `page`, `limit` | Paginated safe wallet provisioning job list. |
+| `GET` | `/api/admin/wallet-provisioning/{id}` | `id` path | Safe wallet provisioning job detail. |
+| `POST` | `/api/admin/wallet-provisioning/{id}/retry` | `id` path | Enqueues/runs a safe retry for a provisioning job. |
+| `POST` | `/api/admin/wallet-provisioning/{id}/mark-manual-review` | `id` path | Marks a provisioning job as reconciliation required. |
 | `POST` | `/api/admin/transactions/{id}/manual-review` | Body `notes` optional | Marks transaction reconciliation status as `MANUAL_REVIEW`. |
 | `GET` | `/api/admin/users/{userId}/wallet-summary` | `userId` path | Wallet summary for the selected user. |
 

@@ -6,6 +6,7 @@ import { Transaction } from '../entities/Transaction';
 import { Wallet } from '../entities/Wallet';
 import { auditService, sanitizeAuditMetadata } from '../services/auditService';
 import { reconciliationService } from '../services/reconciliationService';
+import { walletProvisioningService } from '../services/walletProvisioningService';
 
 const pagination = (req: Request) => {
   const page = Math.max(1, Number(req.query.page || 1));
@@ -95,4 +96,27 @@ export const getUserWalletSummary = async (req: Request, res: Response) => {
       bankName: wallet.bankName,
     })),
   });
+};
+
+export const listWalletProvisioningJobs = async (req: Request, res: Response) => {
+  const { page, limit } = pagination(req);
+  return res.json({ ok: true, ...(await walletProvisioningService.listJobs(page, limit)) });
+};
+
+export const getWalletProvisioningJob = async (req: Request, res: Response) => {
+  const job = await walletProvisioningService.getJob(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, message: 'Wallet provisioning job not found' });
+  return res.json({ ok: true, job });
+};
+
+export const retryWalletProvisioningJob = async (req: Request, res: Response) => {
+  const result = await walletProvisioningService.retryJob(req.params.id, req.user?.id);
+  if (!result) return res.status(404).json({ ok: false, message: 'Wallet provisioning job not found' });
+  return res.json({ ok: true, job: walletProvisioningService.adminResponse(result.job) });
+};
+
+export const markWalletProvisioningManualReview = async (req: Request, res: Response) => {
+  const job = await walletProvisioningService.markManualReview(req.params.id, req.user?.id);
+  if (!job) return res.status(404).json({ ok: false, message: 'Wallet provisioning job not found' });
+  return res.json({ ok: true, job });
 };

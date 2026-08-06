@@ -1,6 +1,6 @@
 # Maplerad Integration Audit
 
-Audit date: 2026-07-19
+Audit date: 2026-08-06
 
 Scope: Papafi backend Maplerad service, wallet/KYC/transaction controllers, routes, reconciliation, environment validation, OpenAPI/Swagger docs, and related tests/scripts.
 
@@ -60,7 +60,8 @@ Official documentation reviewed:
 ## Security Notes
 
 - No provider secret, BVN, PAN, CVV, bearer token, webhook secret, or full sensitive provider payload should be printed by readiness or smoke tests.
-- Automatic customer recovery attaches a Maplerad customer only when exactly one provider customer matches verified Papafi email, phone, first name, and last name. Ambiguous, partial, missing, or conflicting matches return admin reconciliation errors.
+- Automatic customer recovery attaches a Maplerad customer only when exactly one provider customer matches verified Papafi email, normalized Nigerian E.164 phone, first name, and last name. DOB must match when both sides provide it. Ambiguous, partial, missing, or conflicting matches return admin reconciliation errors. Recovery cooldowns are keyed by a safe identity fingerprint and parser version so corrected profile data and parser deployments can retry immediately.
+- Default NGN wallet provisioning is automatic after successful BVN/Tier 1 KYC. The KYC response includes `walletProvisioning`, and a durable `wallet_provisioning_job` records `PENDING`, `PROCESSING`, `PROVISIONED`, `RETRYING`, `RECONCILIATION_REQUIRED`, or `FAILED`.
 - NGN and USD accounts are stored as separate account ProviderReference rows and never as currency fields on the customer reference.
 - The live readiness script does not perform transfers, deposits, card funding, card withdrawals, or unauthorized identity checks.
 - The staging smoke test skips live KYC and provider-affecting wallet/account creation unless `MAPLERAD_LIVE_TESTS_ENABLED=true`.

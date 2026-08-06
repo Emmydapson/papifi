@@ -64,7 +64,8 @@ KYC/BVN behavior:
 - `GET /api/kyc/status` returns sanitized current KYC summaries only. It does not expose raw provider responses, full BVNs, names, DOBs, phone numbers, base64 identity images, document numbers, upload URLs, or internal notes.
 - `POST /api/wallet/create/{userId}`, `POST /api/wallet/create-usd/{userId}`, and `GET /api/wallet/balance/{userId}` allow normal users to access only their own user ID. Admin and super-admin roles may act on another user's ID.
 - Wallet creation reuses one Maplerad customer across NGN and USD. If Maplerad reports `customer is already enrolled`, the backend may run bounded exact-match recovery through documented customer pagination; smoke tests must use mocked provider responses unless an operator explicitly enables live Maplerad tests.
-- `GET /api/wallet/balance/{userId}` returns `walletState` as `PROVISIONED`, `NOT_PROVISIONED`, or `RECONCILIATION_REQUIRED`.
+- After successful BVN KYC, the response includes `walletProvisioning` for the default NGN wallet. Poll `GET /api/wallet/provisioning-status` or `GET /api/wallet/balance/{userId}` until `PROVISIONED`.
+- `GET /api/wallet/balance/{userId}` returns `walletState` as `PROVISIONED`, `PENDING_PROVISIONING`, `KYC_REQUIRED`, `NOT_PROVISIONED`, or `RECONCILIATION_REQUIRED`.
 
 Against deployed staging:
 
@@ -172,6 +173,7 @@ The script covers:
 - `POST /api/kyc/bvn` when a sandbox BVN is supplied
 - `POST /api/kyc/documents`
 - `POST /api/wallet/create/{userId}`
+- `GET /api/wallet/provisioning-status`
 - `POST /api/wallet/create-usd/{userId}`
 - `GET /api/wallet/balance/{userId}`
 - `GET /api/transaction`
@@ -181,6 +183,7 @@ The script covers:
 - `GET /api/admin/audit-logs`
 - `GET /api/admin/risk-flags`
 - `GET /api/admin/reconciliation`
+- `GET /api/admin/wallet-provisioning`
 - `POST /api/admin/transactions/{id}/manual-review`
 - `GET /api/admin/users/{userId}/wallet-summary`
 

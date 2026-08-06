@@ -44,6 +44,7 @@ type MapleradCustomerRecoveryCode =
   | 'MAPLERAD_CUSTOMER_NOT_FOUND'
   | 'MAPLERAD_CUSTOMER_AMBIGUOUS'
   | 'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH'
+  | 'MAPLERAD_CUSTOMER_RECOVERY_PROFILE_INCOMPLETE'
   | 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED';
 
 type MapleradVirtualAccount = {
@@ -91,6 +92,7 @@ export type MapleradApplicationErrorCode =
   | 'MAPLERAD_CUSTOMER_NOT_FOUND'
   | 'MAPLERAD_CUSTOMER_AMBIGUOUS'
   | 'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH'
+  | 'MAPLERAD_CUSTOMER_RECOVERY_PROFILE_INCOMPLETE'
   | 'MAPLERAD_VALIDATION_ERROR'
   | 'MAPLERAD_CONTRACT_ERROR'
   | 'MAPLERAD_RATE_LIMITED'
@@ -199,6 +201,8 @@ export const mapleradErrorToClientResponse = (error: MapleradProviderError) => {
     message:
       code === 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED'
         ? 'An existing Maplerad customer must be linked before creating this account.'
+        : code === 'MAPLERAD_CUSTOMER_RECOVERY_PROFILE_INCOMPLETE'
+        ? 'Complete the required verified profile details before wallet provisioning can continue.'
         : code === 'CUSTOMER_NOT_TIER1'
         ? 'Customer must complete Tier 1 KYC before a NGN virtual account can be created.'
         : error.message,
@@ -594,13 +598,8 @@ export class MapleRadService {
       return this.normalizePhoneForMatch(`${countryCode}${number}`);
     }
     const raw = String(value).trim();
-    const plus = raw.startsWith('+') ? '+' : '';
     const digits = raw.replace(/\D/g, '');
-    if (!digits) return '';
-    if (plus) return `+${digits}`;
-    if (digits.startsWith('234')) return `+${digits}`;
-    if (digits.startsWith('0') && digits.length === 11) return `+234${digits.slice(1)}`;
-    return `+${digits}`;
+    return this.normalizeNigerianPhone(digits) || '';
   }
 
   private normalizeDateForMatch(value?: string | null) {
@@ -638,7 +637,9 @@ export class MapleRadService {
 
   private async verifiedIdentityForUser(user: User, manager?: EntityManager) {
     const repo = (manager || AppDataSource.manager).getRepository(Profile);
-    const profile = await repo.findOne({ where: { user: { id: user.id } } });
+    const profile = typeof (repo as any).findOne === 'function'
+      ? await repo.findOne({ where: { user: { id: user.id } } })
+      : undefined;
     const email = this.normalizeEmail(profile?.email || user.email);
     const phone = this.normalizePhoneForMatch(profile?.phoneNumber || user.phoneNumber);
     const firstName = this.normalizeName(profile?.firstName || user.firstName);
@@ -646,6 +647,37 @@ export class MapleRadService {
     const dob = this.normalizeDateForMatch(profile?.dateOfBirth);
     const sufficientlyVerified = Boolean(user.isVerified && user.isKYCVerified && email && phone && firstName && lastName);
     return { sufficientlyVerified, email, phone, firstName, lastName, dob };
+  }
+
+  private maskedUserId(userId: string) {
+    return crypto.createHash('sha256').update(userId).digest('hex').slice(0, 12);
+  }
+
+  private safeRecoveryFingerprint(identity: {
+    email?: string;
+    phone?: string;
+    firstName?: string;
+    lastName?: string;
+    dob?: string;
+  }) {
+    const hash = (value?: string) => (value ? crypto.createHash('sha256').update(value).digest('hex') : null);
+    return crypto
+      .createHash('sha256')
+      .update(
+        JSON.stringify({
+          providerEnvironment: this.environment,
+          emailHash: hash(identity.email),
+          phoneHash: hash(identity.phone),
+          firstNameHash: hash(identity.firstName),
+          lastNameHash: hash(identity.lastName),
+          dobHash: hash(identity.dob),
+        })
+      )
+      .digest('hex');
+  }
+
+  private recoveryParserVersion() {
+    return 'customers-list-v2';
   }
 
   public async evaluateCustomerIdentityMatch(user: User, customer: MapleradCustomer, manager?: EntityManager) {
@@ -749,8 +781,12 @@ export class MapleRadService {
     return customer;
   }
 
-  async ensureMapleRadCustomer(userId: string): Promise<string> {
-    return AppDataSource.transaction(async (manager) => this.ensureMapleRadCustomerForUser(userId, manager));
+  async ensureMapleRadCustomer(userId: string, options: { forceRecoveryRetry?: boolean } = {}): Promise<string> {
+    return AppDataSource.transaction(async (manager) => this.ensureMapleRadCustomerForUser(userId, manager, options));
+  }
+
+  async resolveOrCreateMapleradCustomer(userId: string, options: { forceRecoveryRetry?: boolean } = {}): Promise<string> {
+    return this.ensureMapleRadCustomer(userId, options);
   }
 
   private async persistCustomerReference(
@@ -810,6 +846,16 @@ export class MapleRadService {
   }
 
   private recoveryErrorFromResult(result: string, providerStatus?: number, providerMessage?: string, requestId?: string) {
+    if (result === 'profile_incomplete') {
+      return new MapleradCustomerRecoveryError(
+        'MAPLERAD_CUSTOMER_RECOVERY_PROFILE_INCOMPLETE',
+        'Complete the required verified profile details before wallet provisioning can continue.',
+        'COMPLETE_PROFILE',
+        providerStatus,
+        providerMessage,
+        requestId
+      );
+    }
     if (result === 'ambiguous') {
       return new MapleradCustomerRecoveryError(
         'MAPLERAD_CUSTOMER_AMBIGUOUS',
@@ -850,15 +896,42 @@ export class MapleRadService {
     );
   }
 
-  private async recoverAlreadyEnrolledCustomer(user: User, manager: EntityManager, sourceError: MapleradProviderError) {
-    const cooldown = await this.activeRecoveryCooldown(user.id, 'already_enrolled');
+  private async recoverAlreadyEnrolledCustomer(user: User, manager: EntityManager, sourceError: MapleradProviderError, options: { force?: boolean } = {}) {
+    const identity = await this.verifiedIdentityForUser(user, manager);
+    const identityFingerprint = this.safeRecoveryFingerprint(identity);
+    logger.info('maplerad_customer_recovery_started', {
+      user: this.maskedUserId(user.id),
+      providerEnvironment: this.environment,
+      identityFingerprint,
+      hasEmail: Boolean(identity.email),
+      hasPhone: Boolean(identity.phone),
+      hasFirstName: Boolean(identity.firstName),
+      hasLastName: Boolean(identity.lastName),
+      hasDob: Boolean(identity.dob),
+      verifiedIdentity: identity.sufficientlyVerified,
+      requestId: sourceError.requestId,
+    });
+    if (!identity.sufficientlyVerified) {
+      await this.recordRecoveryAttempt(user.id, 'already_enrolled', 'profile_incomplete', { identityFingerprint });
+      throw this.recoveryErrorFromResult('profile_incomplete', sourceError.providerStatus, sourceError.providerMessage, sourceError.requestId);
+    }
+
+    const cooldown = options.force ? undefined : await this.activeRecoveryCooldown(user.id, 'already_enrolled', identityFingerprint);
     if (cooldown) throw this.recoveryErrorFromResult(cooldown.result, sourceError.providerStatus, sourceError.providerMessage, sourceError.requestId);
 
     try {
       const result = await this.discoverMatchingMapleradCustomers(user, manager);
       if (result.exactMatches.length === 0) {
         const recoveryResult = result.partialMatches.length > 0 ? 'identity_mismatch' : 'not_found';
+        logger.info('maplerad_customer_recovery_no_match', {
+          user: this.maskedUserId(user.id),
+          providerEnvironment: this.environment,
+          scanned: result.scanned,
+          partialMatches: result.partialMatches.length,
+          requestIds: result.requestIds,
+        });
         await this.recordRecoveryAttempt(user.id, 'already_enrolled', recoveryResult, {
+          identityFingerprint,
           scanned: result.scanned,
           partialMatches: result.partialMatches.length,
           requestIds: result.requestIds,
@@ -866,7 +939,15 @@ export class MapleRadService {
         throw this.recoveryErrorFromResult(recoveryResult, sourceError.providerStatus, sourceError.providerMessage, sourceError.requestId);
       }
       if (result.exactMatches.length > 1) {
+        logger.warn('maplerad_customer_recovery_ambiguous', {
+          user: this.maskedUserId(user.id),
+          providerEnvironment: this.environment,
+          scanned: result.scanned,
+          exactMatches: result.exactMatches.length,
+          requestIds: result.requestIds,
+        });
         await this.recordRecoveryAttempt(user.id, 'already_enrolled', 'ambiguous', {
+          identityFingerprint,
           scanned: result.scanned,
           exactMatches: result.exactMatches.length,
           requestIds: result.requestIds,
@@ -876,15 +957,34 @@ export class MapleRadService {
 
       const exact = result.exactMatches[0];
       const customerId = exact.customer.id;
-      return this.persistCustomerReference(manager, user, customerId, 'auto_recovered', {
+      logger.info('maplerad_customer_recovery_exact_match', {
+        user: this.maskedUserId(user.id),
+        providerEnvironment: this.environment,
+        matchedFields: exact.matchedFields,
+        scanned: result.scanned,
+        requestIds: result.requestIds,
+      });
+      const persistedCustomerId = await this.persistCustomerReference(manager, user, customerId, 'auto_recovered', {
         recoveryMethod: 'bounded_customer_pagination',
         matchedFields: exact.matchedFields,
         scanned: result.scanned,
         requestIds: result.requestIds,
       });
+      await this.recordRecoveryAttempt(user.id, 'already_enrolled', 'success', {
+        identityFingerprint,
+        scanned: result.scanned,
+        requestIds: result.requestIds,
+      });
+      logger.info('maplerad_customer_recovery_linked', {
+        user: this.maskedUserId(user.id),
+        providerEnvironment: this.environment,
+        requestIds: result.requestIds,
+      });
+      return persistedCustomerId;
     } catch (error) {
       if (error instanceof MapleradCustomerRecoveryError) throw error;
       await this.recordRecoveryAttempt(user.id, 'already_enrolled', 'provider_unavailable', {
+        identityFingerprint,
         message: isMapleradProviderError(error) ? error.providerMessage || error.message : (error as any)?.message,
       });
       throw new MapleradCustomerRecoveryError(
@@ -898,7 +998,7 @@ export class MapleRadService {
     }
   }
 
-  private async ensureMapleRadCustomerForUser(userId: string, manager: EntityManager): Promise<string> {
+  private async ensureMapleRadCustomerForUser(userId: string, manager: EntityManager, options: { forceRecoveryRetry?: boolean } = {}): Promise<string> {
     const user = await this.lockUser(manager, userId);
     if (!user) throw new Error('User not found');
 
@@ -951,7 +1051,9 @@ export class MapleRadService {
       return reference.providerCustomerId;
     }
 
-    const partialFailureCooldown = await this.activeRecoveryCooldown(user.id, 'customer_create_persistence');
+    const identity = await this.verifiedIdentityForUser(user, manager);
+    const identityFingerprint = this.safeRecoveryFingerprint(identity);
+    const partialFailureCooldown = await this.activeRecoveryCooldown(user.id, 'customer_create_persistence', identityFingerprint);
     if (partialFailureCooldown) {
       throw this.recoveryErrorFromResult('persistence_failed');
     }
@@ -992,6 +1094,7 @@ export class MapleRadService {
           providerCustomerId: customerId,
         });
         await this.recordRecoveryAttempt(user.id, 'customer_create_persistence', 'persistence_failed', {
+          identityFingerprint,
           providerCustomerId: customerId,
           requestId: this.providerRequestId(response.headers),
         });
@@ -1010,7 +1113,7 @@ export class MapleRadService {
         error.code === 'VALIDATION' &&
         String(error.providerMessage || '').toLowerCase().includes('already enrolled')
       ) {
-        return this.recoverAlreadyEnrolledCustomer(user, manager, error);
+        return this.recoverAlreadyEnrolledCustomer(user, manager, error, { force: options.forceRecoveryRetry });
       }
       throw error;
     }
@@ -1416,20 +1519,32 @@ export class MapleRadService {
       path: '/customers',
       params: { page, page_size: pageSize },
     });
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.customers)) return data.customers;
-    if (Array.isArray(data?.items)) return data.items;
-    return [];
+    return this.customerListFromEnvelope(data);
   }
 
   private customerListFromEnvelope(data: any): MapleradCustomer[] {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (Array.isArray(data?.data?.customers)) return data.data.customers;
-    if (Array.isArray(data?.data?.items)) return data.data.items;
-    if (Array.isArray(data?.customers)) return data.customers;
-    if (Array.isArray(data?.items)) return data.items;
-    return [];
+    const candidates = [
+      data,
+      data?.data,
+      data?.data?.customers,
+      data?.data?.items,
+      data?.customers,
+      data?.items,
+      data?.result,
+      data?.result?.customers,
+      data?.result?.items,
+    ];
+    const list = candidates.find(Array.isArray);
+    if (list) return list;
+    throw new MapleradProviderError(
+      'Maplerad customer list returned malformed response',
+      'maplerad.customer.list_recovery',
+      undefined,
+      'missing customer list',
+      undefined,
+      this.sanitizeProviderPayload(data),
+      'SCHEMA'
+    );
   }
 
   private recoveryLimits() {
@@ -1480,16 +1595,24 @@ export class MapleRadService {
       customers.push(...pageCustomers);
       const requestId = this.providerRequestId(response.headers);
       if (requestId) requestIds.push(requestId);
+      logger.info('maplerad_customer_recovery_page_loaded', {
+        providerEnvironment: this.environment,
+        page,
+        recordCount: pageCustomers.length,
+        requestId,
+      });
       if (pageCustomers.length < limits.pageSize) break;
     }
     return { customers, requestIds, limits };
   }
 
-  private async activeRecoveryCooldown(userId: string, reason: string) {
+  private async activeRecoveryCooldown(userId: string, reason: string, identityFingerprint?: string) {
     const attempt = await AppDataSource.getRepository(MapleradCustomerRecoveryAttempt).findOne({
       where: { userId, providerEnvironment: this.environment, reason },
     });
     if (!attempt || attempt.expiresAt <= new Date()) return undefined;
+    if (attempt.identityFingerprint !== identityFingerprint) return undefined;
+    if (attempt.metadata?.parserVersion !== this.recoveryParserVersion()) return undefined;
     return attempt;
   }
 
@@ -1507,7 +1630,8 @@ export class MapleRadService {
     attempt.result = result;
     attempt.attemptedAt = now;
     attempt.expiresAt = expiresAt;
-    attempt.metadata = this.sanitizeProviderPayload(metadata);
+    attempt.identityFingerprint = typeof metadata.identityFingerprint === 'string' ? metadata.identityFingerprint : attempt.identityFingerprint;
+    attempt.metadata = this.sanitizeProviderPayload({ ...metadata, parserVersion: this.recoveryParserVersion() });
     await repo.save(attempt);
   }
 
@@ -1521,6 +1645,13 @@ export class MapleRadService {
       const match = await this.evaluateCustomerIdentityMatch(user, { ...customer, id: customerId }, manager);
       if (match.exact) exactMatches.push({ customer: { ...customer, id: customerId }, matchedFields: match.matchedFields });
       else if (match.matchedFields.length > 0) {
+        logger.info('maplerad_customer_recovery_candidate_rejected', {
+          user: this.maskedUserId(user.id),
+          providerEnvironment: this.environment,
+          matchedFields: match.matchedFields,
+          mismatches: match.mismatches,
+          identityAvailable: match.identityAvailable,
+        });
         partialMatches.push({ customerId, mismatches: match.mismatches, matchedFields: match.matchedFields });
       }
     }
