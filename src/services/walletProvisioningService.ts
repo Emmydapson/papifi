@@ -48,7 +48,18 @@ class WalletProvisioningService {
     if (!user) return { eligible: false, code: 'USER_NOT_FOUND' };
     if (!user.isVerified) return { eligible: false, code: 'EMAIL_VERIFICATION_REQUIRED' };
     if (!user.transactionPin) return { eligible: false, code: 'TRANSACTION_PIN_REQUIRED' };
-    if (!user.isKYCVerified || user.accountTier !== 'APPROVED') return { eligible: false, code: 'KYC_REQUIRED' };
+    if (!user.isKYCVerified && user.accountTier === 'UNVERIFIED') return { eligible: false, code: 'KYC_REQUIRED' };
+    const customerReference = await AppDataSource.getRepository(ProviderReference).findOne({
+      where: {
+        userId,
+        provider: 'maplerad',
+        providerEnvironment: this.environment(),
+        referenceType: 'customer',
+      },
+    });
+    if (customerReference?.metadata?.tier1EnrollmentState !== 'TIER_1' && customerReference?.status !== 'tier1_confirmed') {
+      return { eligible: false, code: 'MAPLERAD_TIER1_REQUIRED' };
+    }
     return { eligible: true, user };
   }
 

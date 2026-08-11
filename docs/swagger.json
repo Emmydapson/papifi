@@ -1991,6 +1991,22 @@
           "address": {
             "type": "string",
             "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "state": {
+            "type": "string",
+            "nullable": true
+          },
+          "postalCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "country": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
@@ -1998,9 +2014,6 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "gender": {
-            "type": "string"
-          },
           "phoneNumber": {
             "type": "string"
           },
@@ -2009,13 +2022,23 @@
             "example": "NG"
           },
           "nationality": {
-            "type": "string"
+            "type": "string",
+            "example": "NG"
           },
           "dateOfBirth": {
             "type": "string",
             "format": "date"
           },
           "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "postalCode": {
             "type": "string"
           }
         }
@@ -2162,12 +2185,93 @@
               "FAILED"
             ]
           },
+          "accountTier": {
+            "type": "string",
+            "enum": [
+              "BVN_VERIFIED"
+            ]
+          },
           "verificationId": {
             "type": "string",
             "format": "uuid"
           },
           "reused": {
             "type": "boolean"
+          },
+          "tier1Enrollment": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "NOT_STARTED",
+                  "PROFILE_INCOMPLETE",
+                  "PENDING",
+                  "PROCESSING",
+                  "TIER_1",
+                  "RETRYING",
+                  "RECONCILIATION_REQUIRED",
+                  "FAILED"
+                ]
+              },
+              "mapleradCustomerTier": {
+                "type": "string",
+                "enum": [
+                  "TIER_1"
+                ]
+              },
+              "code": {
+                "type": "string",
+                "enum": [
+                  "MAPLERAD_TIER1_PROFILE_INCOMPLETE",
+                  "MAPLERAD_TIER1_ENROLLMENT_FAILED"
+                ]
+              },
+              "missingFields": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "dateOfBirth",
+                    "phoneNumber",
+                    "address",
+                    "city",
+                    "state",
+                    "country",
+                    "postalCode"
+                  ]
+                }
+              },
+              "providerStatus": {
+                "type": "integer"
+              },
+              "requestId": {
+                "type": "string"
+              }
+            }
+          },
+          "walletProvisioning": {
+            "type": "object",
+            "properties": {
+              "currency": {
+                "type": "string",
+                "enum": [
+                  "NGN"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "KYC_REQUIRED",
+                  "PENDING",
+                  "PROCESSING",
+                  "RETRYING",
+                  "FAILED",
+                  "RECONCILIATION_REQUIRED",
+                  "PROVISIONED"
+                ]
+              }
+            }
           }
         }
       },
@@ -2323,6 +2427,8 @@
             "type": "string",
             "enum": [
               "PROVISIONED",
+              "PENDING_PROVISIONING",
+              "KYC_REQUIRED",
               "NOT_PROVISIONED",
               "RECONCILIATION_REQUIRED"
             ]

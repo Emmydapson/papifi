@@ -41,7 +41,7 @@ All sensitive-looking values below are documentation-only placeholders. Replace 
   "POST /api/auth/reset-passwordOtp": { "email": "ada.okafor@operator-controlled-domain.tld", "otp": "000000" },
   "POST /api/auth/reset-password": { "email": "ada.okafor@operator-controlled-domain.tld", "otp": "000000", "newPassword": "DOCS_ONLY_NEW_PASSWORD" },
   "POST /api/auth/create-pin": { "pin": "0000" },
-  "PUT /api/profile": { "gender": "female", "phoneNumber": "+2348012345678", "country": "NG", "nationality": "Nigerian", "dateOfBirth": "1995-04-12", "address": "12 Example Road, Lagos" },
+  "PUT /api/profile": { "phoneNumber": "+2348012345678", "country": "NG", "nationality": "NG", "dateOfBirth": "1995-04-12", "address": "12 Example Road", "city": "Ikeja", "state": "Lagos", "postalCode": "100001" },
   "PUT /api/profile/change-password": { "currentPassword": "DOCS_ONLY_CURRENT_PASSWORD", "newPassword": "DOCS_ONLY_NEW_PASSWORD" }
 }
 ```
@@ -160,29 +160,59 @@ Create or update it with `POST /api/auth/create-pin`. PIN must be exactly 4 digi
 
 | Method | Path | Auth | Body or Query | Success |
 | --- | --- | --- | --- | --- |
-| `GET` | `/api/profile` | Bearer | None | Returns `firstName`, `lastName`, `email`, `gender`, `phoneNumber`, `nationality`, `dateOfBirth`, `address`. |
-| `PUT` | `/api/profile` | Bearer | Any of `gender`, `phoneNumber`, `country`, `nationality`, `dateOfBirth`, `address` | Returns updated profile object. `email`, `firstName`, and `lastName` cannot be changed here. |
+| `GET` | `/api/profile` | Bearer | None | Returns `firstName`, `lastName`, `email`, `gender`, `phoneNumber`, `nationality`, `dateOfBirth`, `address`, `city`, `state`, `postalCode`, `country`. |
+| `PUT` | `/api/profile` | Bearer | Any of `phoneNumber`, `country`, `nationality`, `dateOfBirth`, `address`, `city`, `state`, `postalCode` | Returns updated profile object. `email`, `firstName`, `lastName`, and `gender` cannot be changed here. |
 | `PUT` | `/api/profile/change-password` | Bearer | `currentPassword`, `newPassword` | `{ "message": "Password updated successfully" }` |
 
 The service rejects updates to `email`, `firstName`, and `lastName`.
 
 ## KYC Flow
 
-Papafi currently supports Maplerad BVN verification, Maplerad Tier 1 customer upgrade, and document metadata collection.
+Papifi currently supports Maplerad BVN verification, Maplerad Tier 1 customer enrollment, and document metadata collection.
 
 1. Call `POST /api/kyc/start` to retrieve provider and supported document types.
-2. Collect BVN and call `POST /api/kyc/bvn`. Include structured home address fields when the profile only has a single address string.
-3. If document collection is required, upload images to the client-approved storage flow and send metadata URLs to `POST /api/kyc/documents`.
-4. Poll or refresh with `GET /api/kyc/status`.
+2. Collect profile/KYC details, especially `dateOfBirth`, Nigerian `phoneNumber`, and structured home address fields.
+3. Collect BVN and call `POST /api/kyc/bvn`. BVN verification is independent from Tier 1 enrollment and wallet provisioning.
+4. If document collection is required, upload images to the client-approved storage flow and send metadata URLs to `POST /api/kyc/documents`.
+5. Poll or refresh with `GET /api/kyc/status` and `GET /api/wallet/provisioning-status`.
 
 | Method | Path | Auth | Body | Success |
 | --- | --- | --- | --- | --- |
 | `POST` | `/api/kyc/start` | Bearer | None | Returns provider `maplerad` and document types. |
-| `POST` | `/api/kyc/bvn` | Bearer | `bvn` as 11 digits; optional `dateOfBirth`, `phoneNumber`, `address` object, `city`, `state`, `country`, `postalCode`, `photo` for Tier 1 upgrade | Returns KYC status and `walletProvisioning` state when BVN passes. |
+| `POST` | `/api/kyc/bvn` | Bearer | `bvn` as 11 digits; optional `dateOfBirth`, `phoneNumber`, `address` object, `city`, `state`, `country`, `postalCode`, `photo` for Tier 1 enrollment | Returns BVN status, `tier1Enrollment`, and `walletProvisioning` when BVN passes. |
 | `POST` | `/api/kyc/documents` | Bearer | `documentType`, optional `documentNumber`, `frontImageUrl`, `backImageUrl`, `selfieImageUrl`, `issuedCountry`, `expiresAt` | `{ "message": "KYC document metadata submitted.", "verificationId": "<uuid>", "status": "PENDING" }` |
 | `GET` | `/api/kyc/status` | Bearer | None | Returns user KYC verification records. |
 
-Supported document types are `NIN`, `DRIVERS_LICENSE`, `INTERNATIONAL_PASSPORT`, and `VOTERS_CARD`. BVN is redacted server-side in stored metadata; clients must still avoid storing it. A successful BVN response means Papafi has also attempted the Maplerad Tier 1 customer upgrade and re-fetched the provider customer; missing structured address data returns a Tier 1 KYC error instead of marking local KYC complete.
+Supported document types are `NIN`, `DRIVERS_LICENSE`, `INTERNATIONAL_PASSPORT`, and `VOTERS_CARD`. BVN is redacted server-side in stored metadata; clients must still avoid storing it. A successful BVN response keeps `status: "PASSED"` even when Maplerad Tier 1 enrollment or wallet provisioning cannot continue.
+
+Frontend state mapping:
+
+- `BVN_FAILED`: `status` is `FAILED`.
+- `PROFILE_INCOMPLETE`: `status` is `PASSED` and `tier1Enrollment.state` is `PROFILE_INCOMPLETE`; collect only `tier1Enrollment.missingFields`.
+- `TIER1_PENDING`: `tier1Enrollment.state` is `PENDING`, `PROCESSING`, or `RETRYING`.
+- `TIER1_FAILED`: `tier1Enrollment.state` is `FAILED` or `RECONCILIATION_REQUIRED`.
+- `WALLET_PENDING`: `tier1Enrollment.state` is `TIER_1` and `walletProvisioning.state` is `PENDING`, `PROCESSING`, or `RETRYING`.
+- `WALLET_PROVISIONED`: `walletProvisioning.state` or `walletState` is `PROVISIONED`.
+
+Successful BVN with missing Tier 1 fields:
+
+```json
+{
+  "message": "BVN verified successfully, but additional profile information is required to complete Tier 1 KYC.",
+  "code": "BVN_VERIFIED",
+  "status": "PASSED",
+  "accountTier": "BVN_VERIFIED",
+  "tier1Enrollment": {
+    "state": "PROFILE_INCOMPLETE",
+    "code": "MAPLERAD_TIER1_PROFILE_INCOMPLETE",
+    "missingFields": ["city", "state", "postalCode"]
+  },
+  "walletProvisioning": {
+    "currency": "NGN",
+    "state": "KYC_REQUIRED"
+  }
+}
+```
 
 ## Wallet and Account Flow
 
@@ -207,7 +237,7 @@ Wallet balance responses include `walletState`:
 Normal onboarding flow:
 
 ```text
-Register -> OTP -> PIN -> KYC -> walletProvisioning=PENDING -> poll provisioning/balance state -> walletState=PROVISIONED
+Registration -> OTP -> PIN -> profile/KYC details -> BVN verification -> Maplerad Tier 1 enrollment -> NGN wallet provisioning
 ```
 
 The frontend should not normally call `POST /api/wallet/create/{userId}` after KYC. That route is retained for idempotent retry/repair and support workflows. USD remains optional and user-triggered.

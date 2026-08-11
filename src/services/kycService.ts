@@ -29,6 +29,16 @@ export type KycAttemptOutcome =
   | 'CONFIGURATION_ERROR'
   | 'INSUFFICIENT_PROVIDER_BALANCE';
 
+export type Tier1EnrollmentState =
+  | 'NOT_STARTED'
+  | 'PROFILE_INCOMPLETE'
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'TIER_1'
+  | 'RETRYING'
+  | 'RECONCILIATION_REQUIRED'
+  | 'FAILED';
+
 const bvnTypes = new Set<KycType>(['BVN']);
 
 export const normalizeBvnInput = (input: unknown): NormalizedBvnInput => {
@@ -104,6 +114,15 @@ export const providerErrorAttemptOutcome = (code: string): KycAttemptOutcome => 
   if (code === 'MAPLERAD_AUTHENTICATION_FAILED' || code === 'MAPLERAD_CONFIGURATION_ERROR') return 'CONFIGURATION_ERROR';
   if (code === 'MAPLERAD_VALIDATION_ERROR') return 'PROVIDER_REJECTED';
   return 'PROVIDER_UNAVAILABLE';
+};
+
+export const walletStateForTier1State = (state: Tier1EnrollmentState) => {
+  if (state === 'TIER_1') return 'PENDING';
+  if (state === 'PROFILE_INCOMPLETE') return 'KYC_REQUIRED';
+  if (state === 'PENDING' || state === 'PROCESSING' || state === 'RETRYING') return 'KYC_REQUIRED';
+  if (state === 'RECONCILIATION_REQUIRED') return 'KYC_REQUIRED';
+  if (state === 'FAILED') return 'KYC_REQUIRED';
+  return 'KYC_REQUIRED';
 };
 
 const dateOrUndefined = (value: unknown): string | undefined => {

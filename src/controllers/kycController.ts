@@ -18,12 +18,27 @@ import {
   normalizeBvnInput,
   providerErrorAttemptOutcome,
   serializeKycStatus,
+  walletStateForTier1State,
 } from '../services/kycService';
 
 let mapleRadServiceInstance: MapleRadService | undefined;
 const getMapleRadService = () => (mapleRadServiceInstance ??= new MapleRadService());
 const kycRepo = AppDataSource.getRepository(KycVerification);
 const userRepo = AppDataSource.getRepository(User);
+
+const tier1Response = (result: Awaited<ReturnType<MapleRadService['enrollMapleradCustomerTier1']>>) => ({
+  state: result.state,
+  mapleradCustomerTier: result.tier1 ? 'TIER_1' : undefined,
+  code: result.code,
+  missingFields: result.state === 'PROFILE_INCOMPLETE' ? result.missingFields || [] : undefined,
+  providerStatus: result.state === 'FAILED' || result.state === 'RETRYING' ? result.providerStatus : undefined,
+  requestId: result.state === 'FAILED' || result.state === 'RETRYING' ? result.requestId : undefined,
+});
+
+const walletResponse = (state: string) => ({
+  currency: 'NGN',
+  state,
+});
 
 const documentTypes: KycType[] = [
   'NIN',
@@ -66,8 +81,9 @@ class KYCController {
         order: { createdAt: 'DESC' },
       });
       if (existingPassed) {
-        await getMapleRadService().ensureCustomerTier1ForBvn(
+        const tier1Result = await getMapleRadService().enrollMapleradCustomerTier1(
           userId,
+          undefined,
           {
             bvn: normalizedBvn.value,
             dateOfBirth: req.body.dateOfBirth,
@@ -81,17 +97,23 @@ class KYCController {
             photo: req.body.photo,
           }
         );
-        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'APPROVED' });
-        const walletProvisioning = await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId);
+        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'BVN_VERIFIED' });
+        const walletProvisioning = tier1Result.tier1
+          ? await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId)
+          : undefined;
         return res.status(200).json({
-          message: 'BVN verification passed.',
+          message: tier1Result.state === 'PROFILE_INCOMPLETE'
+            ? 'BVN verified successfully, but additional profile information is required to complete Tier 1 KYC.'
+            : 'BVN verified successfully.',
           code: 'BVN_VERIFIED',
           status: 'PASSED',
+          accountTier: 'BVN_VERIFIED',
           verificationId: existingPassed.id,
           reused: true,
+          tier1Enrollment: tier1Response(tier1Result),
           walletProvisioning: {
             currency: 'NGN',
-            state: walletProvisioning.state,
+            state: walletProvisioning?.state || walletStateForTier1State(tier1Result.state),
           },
         });
       }
@@ -128,9 +150,23 @@ class KYCController {
             : bvnFailureMetadata(normalizedBvn.redacted, providerResult)),
         },
       });
+      await kycRepo.save(verification);
+      await auditService.log({
+        actorUserId: userId,
+        targetUserId: userId,
+        action: 'KYC_BVN_VERIFICATION',
+        entityType: 'KycVerification',
+        entityId: verification.id,
+        metadata: { status: verification.status },
+        req,
+      });
+
+      let tier1Result: Awaited<ReturnType<MapleRadService['enrollMapleradCustomerTier1']>> | undefined;
       if (passed) {
-        const tier1Result = await service.ensureCustomerTier1ForBvn(
+        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'BVN_VERIFIED' });
+        tier1Result = await service.enrollMapleradCustomerTier1(
           userId,
+          undefined,
           {
             bvn: normalizedBvn.value,
             dateOfBirth: req.body.dateOfBirth,
@@ -145,37 +181,31 @@ class KYCController {
           },
           providerResult.identity
         );
-        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'APPROVED' });
         verification.metadata = {
           ...(verification.metadata || {}),
           mapleradCustomerId: tier1Result.customerId,
-          mapleradCustomerTier1: tier1Result.tier1,
+          mapleradTier1EnrollmentState: tier1Result.state,
         };
+        await kycRepo.save(verification);
       }
-      await kycRepo.save(verification);
-      await auditService.log({
-        actorUserId: userId,
-        targetUserId: userId,
-        action: 'KYC_BVN_VERIFICATION',
-        entityType: 'KycVerification',
-        entityId: verification.id,
-        metadata: { status: verification.status },
-        req,
-      });
 
       const walletProvisioning = passed
+        && tier1Result?.tier1
         ? await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId)
         : undefined;
 
       return res.status(200).json({
-        message: passed ? 'BVN verification passed.' : 'BVN verification failed.',
+        message: passed && tier1Result?.state === 'PROFILE_INCOMPLETE'
+          ? 'BVN verified successfully, but additional profile information is required to complete Tier 1 KYC.'
+          : passed
+          ? 'BVN verified successfully.'
+          : 'BVN verification failed.',
         code: providerResult.applicationCode,
         status: verification.status,
-        walletProvisioning: walletProvisioning
-          ? {
-              currency: 'NGN',
-              state: walletProvisioning.state,
-            }
+        accountTier: passed ? 'BVN_VERIFIED' : undefined,
+        tier1Enrollment: tier1Result ? tier1Response(tier1Result) : undefined,
+        walletProvisioning: passed
+          ? walletResponse(walletProvisioning?.state || walletStateForTier1State(tier1Result?.state || 'NOT_STARTED'))
           : undefined,
       });
     } catch (error: any) {

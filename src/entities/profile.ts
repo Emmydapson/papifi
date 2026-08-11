@@ -23,6 +23,15 @@ export class Profile {
   address: string;    // Optional field
 
   @Column({ nullable: true })
+  city?: string;
+
+  @Column({ nullable: true })
+  state?: string;
+
+  @Column({ nullable: true })
+  postalCode?: string;
+
+  @Column({ nullable: true })
   phoneNumber: string;  // Optional, as it's not mandatory in registration
 
   @Column({ nullable: true })

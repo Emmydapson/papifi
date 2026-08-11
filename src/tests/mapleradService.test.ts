@@ -568,6 +568,140 @@ test('ensureCustomerTier1ForBvn upgrades existing Maplerad customer and re-fetch
   assert.deepEqual(calls.filter((call) => call.type === 'get').map((call) => call.customerId), ['cus_1', 'cus_1']);
 });
 
+test('enrollMapleradCustomerTier1 returns PROFILE_INCOMPLETE and does not call provider upgrade', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1', phoneNumber: '+2348012345678' };
+  const savedReferences: any[] = [];
+  const calls: any[] = [];
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Profile') {
+        return { findOne: async () => ({ id: 'profile-1', dateOfBirth: '1990-01-31', address: '12 Example Road', country: 'NG' }) };
+      }
+      if (entity?.name === 'ProviderReference') {
+        return {
+          findOne: async () => undefined,
+          create: (value: any) => value,
+          save: async (value: any) => {
+            savedReferences.push(value);
+            return value;
+          },
+        };
+      }
+      if (entity?.name === 'AuditLog') return { create: (value: any) => value, save: async (value: any) => value };
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async (customerId: string) => ({ id: customerId, tier: '0' });
+  (service as any).upgradeCustomerTier1 = async (payload: any) => {
+    calls.push(payload);
+    return { status: true };
+  };
+
+  try {
+    const result = await service.enrollMapleradCustomerTier1('user-1', undefined, {
+      bvn: '12345678901',
+      address: '12 Example Road',
+      country: 'NG',
+    });
+    assert.equal(result.state, 'PROFILE_INCOMPLETE');
+    assert.equal(result.tier1, false);
+    assert.deepEqual(result.missingFields, ['city', 'state', 'postalCode']);
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.equal(calls.length, 0);
+  assert.equal(savedReferences[0].metadata.tier1EnrollmentState, 'PROFILE_INCOMPLETE');
+  assert.deepEqual(savedReferences[0].metadata.missingFields, ['city', 'state', 'postalCode']);
+});
+
+test('enrollMapleradCustomerTier1 is idempotent when customer is already Tier 1', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1', phoneNumber: '+2348012345678' };
+  let upgradeCalled = false;
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Profile') return { findOne: async () => null };
+      if (entity?.name === 'ProviderReference') return { findOne: async () => undefined, create: (value: any) => value, save: async (value: any) => value };
+      if (entity?.name === 'AuditLog') return { create: (value: any) => value, save: async (value: any) => value };
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async (customerId: string) => ({ id: customerId, tier: '1' });
+  (service as any).upgradeCustomerTier1 = async () => {
+    upgradeCalled = true;
+  };
+
+  try {
+    const result = await service.enrollMapleradCustomerTier1('user-1', undefined, { bvn: '12345678901' });
+    assert.equal(result.state, 'TIER_1');
+    assert.equal(result.upgraded, false);
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.equal(upgradeCalled, false);
+});
+
+test('enrollMapleradCustomerTier1 captures provider validation failure without confirming Tier 1', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1', phoneNumber: '+2348012345678' };
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Profile') {
+        return { findOne: async () => ({ id: 'profile-1', dateOfBirth: '1990-01-31', address: '12 Example Road', city: 'Ikeja', state: 'Lagos', postalCode: '100001', country: 'NG' }) };
+      }
+      if (entity?.name === 'ProviderReference') return { findOne: async () => undefined, create: (value: any) => value, save: async (value: any) => value };
+      if (entity?.name === 'AuditLog') return { create: (value: any) => value, save: async (value: any) => value };
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async (customerId: string) => ({ id: customerId, tier: '0' });
+  (service as any).upgradeCustomerTier1 = async () => {
+    throw new MapleradProviderError(
+      'maplerad.customer.upgrade_tier1 failed with Maplerad status 400',
+      'maplerad.customer.upgrade_tier1',
+      400,
+      'invalid tier 1 payload',
+      'req-tier1',
+      { message: 'invalid tier 1 payload' },
+      'VALIDATION'
+    );
+  };
+
+  try {
+    const result = await service.enrollMapleradCustomerTier1('user-1', undefined, { bvn: '12345678901' });
+    assert.equal(result.state, 'FAILED');
+    assert.equal(result.tier1, false);
+    assert.equal(result.providerStatus, 400);
+    assert.equal(result.requestId, 'req-tier1');
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+});
+
 test('createVirtualAccountForUser sends top-level customer_id after Tier 1 preflight', async () => {
   const service = serviceWithMockedRequest(async () => null, false);
   const originalTransaction = AppDataSource.transaction.bind(AppDataSource);

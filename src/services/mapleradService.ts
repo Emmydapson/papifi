@@ -21,7 +21,7 @@ type MapleradEnvelope<T> = {
   [key: string]: unknown;
 };
 
-type MapleradCustomer = {
+export type MapleradCustomer = {
   id: string;
   customer_id?: string;
   first_name?: string;
@@ -38,6 +38,7 @@ type MapleradCustomer = {
   account_tier?: string | number;
   customer_tier?: string | number;
   phone?: unknown;
+  address?: unknown;
 };
 
 type MapleradCustomerRecoveryCode =
@@ -81,6 +82,8 @@ export type MapleradProviderErrorCode =
 
 export type MapleradApplicationErrorCode =
   | 'CUSTOMER_NOT_TIER1'
+  | 'MAPLERAD_TIER1_PROFILE_INCOMPLETE'
+  | 'MAPLERAD_TIER1_ENROLLMENT_FAILED'
   | 'BVN_NOT_VERIFIED'
   | 'BVN_INVALID'
   | 'BVN_IDENTITY_MISMATCH'
@@ -172,6 +175,8 @@ export const mapleradErrorToApplicationCode = (error: unknown): MapleradApplicat
   if (!isMapleradProviderError(error)) return 'MAPLERAD_UNAVAILABLE';
   if (error instanceof MapleradCustomerRecoveryError) return error.applicationCode as MapleradApplicationErrorCode;
   const message = String(error.providerMessage || '').toLowerCase();
+  if (error.operation === 'maplerad.customer.upgrade_tier1.prepare') return 'MAPLERAD_TIER1_PROFILE_INCOMPLETE';
+  if (error.operation.includes('maplerad.customer.upgrade_tier1')) return 'MAPLERAD_TIER1_ENROLLMENT_FAILED';
   if (error.operation === 'maplerad.customer.create' && message.includes('already enrolled')) {
     return 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED';
   }
@@ -258,6 +263,29 @@ type Tier1UpgradeInput = {
   postalCode?: string;
   postal_code?: string;
   photo?: string;
+};
+
+export type MapleradTier1EnrollmentState =
+  | 'NOT_STARTED'
+  | 'PROFILE_INCOMPLETE'
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'TIER_1'
+  | 'RETRYING'
+  | 'RECONCILIATION_REQUIRED'
+  | 'FAILED';
+
+export type MapleradTier1EnrollmentResult = {
+  customerId: string;
+  customer?: MapleradCustomer;
+  upgraded: boolean;
+  tier1: boolean;
+  state: MapleradTier1EnrollmentState;
+  missingFields?: string[];
+  code?: string;
+  providerStatus?: number;
+  providerMessage?: string;
+  requestId?: string;
 };
 
 export type MapleradWebhookVerificationResult =
@@ -1372,7 +1400,23 @@ export class MapleRadService {
       country: String(objectInput.country || fallback?.country || 'NG').trim().toUpperCase(),
       postal_code: String(objectInput.postal_code || objectInput.postalCode || fallback?.postal_code || fallback?.postalCode || '').trim(),
     };
-    return address.street && address.city && address.state && address.country && address.postal_code ? address : undefined;
+    return address;
+  }
+
+  private missingTier1Fields(input: {
+    dob?: string;
+    phone?: ReturnType<MapleRadService['splitNigerianPhone']>;
+    address?: ReturnType<MapleRadService['normalizeTier1Address']>;
+  }) {
+    const missing: string[] = [];
+    if (!input.dob) missing.push('dateOfBirth');
+    if (!input.phone) missing.push('phoneNumber');
+    if (!input.address?.street) missing.push('address');
+    if (!input.address?.city) missing.push('city');
+    if (!input.address?.state) missing.push('state');
+    if (!input.address?.country) missing.push('country');
+    if (!input.address?.postal_code) missing.push('postalCode');
+    return missing;
   }
 
   private isTier1OrHigher(customer: MapleradCustomer) {
@@ -1393,66 +1437,159 @@ export class MapleRadService {
     };
   }
 
-  async ensureCustomerTier1ForBvn(userId: string, input: Tier1UpgradeInput, identity?: MapleradBvnVerificationResult['identity']) {
+  async enrollMapleradCustomerTier1(
+    userId: string,
+    providerCustomerId?: string,
+    input: Tier1UpgradeInput = {} as Tier1UpgradeInput,
+    identity?: MapleradBvnVerificationResult['identity']
+  ): Promise<MapleradTier1EnrollmentResult> {
     return AppDataSource.transaction(async (manager) => {
       const user = await this.lockUser(manager, userId);
       if (!user) throw new Error('User not found');
       const profile = await manager.getRepository(Profile).findOne({ where: { user: { id: user.id } } });
-      const customerId = await this.ensureMapleRadCustomerForUser(user.id, manager);
+      const customerId = providerCustomerId || await this.ensureMapleRadCustomerForUser(user.id, manager);
       const beforeUpgrade = await this.getCustomerById(customerId);
       if (this.isTier1OrHigher(beforeUpgrade)) {
-        await this.updateCustomerTierReference(manager, user, customerId, beforeUpgrade, 'tier1_confirmed');
-        return { customerId, customer: beforeUpgrade, upgraded: false, tier1: true };
+        await this.updateCustomerTierReference(manager, user, customerId, beforeUpgrade, 'tier1_confirmed', {
+          tier1EnrollmentState: 'TIER_1',
+        });
+        return { customerId, customer: beforeUpgrade, upgraded: false, tier1: true, state: 'TIER_1' };
       }
 
       const dob = this.normalizeDateOfBirthForTier1(input.dateOfBirth || profile?.dateOfBirth || identity?.dateOfBirth);
       const phone = this.splitNigerianPhone(input.phoneNumber || identity?.phoneNumber || profile?.phoneNumber || user.phoneNumber);
       const address = this.normalizeTier1Address(input.address || profile?.address, {
-        city: input.city,
-        state: input.state,
+        city: input.city || profile?.city,
+        state: input.state || profile?.state,
         country: input.country || profile?.country || 'NG',
-        postal_code: input.postalCode || input.postal_code,
+        postal_code: input.postalCode || input.postal_code || profile?.postalCode,
       });
+      const missingFields = this.missingTier1Fields({ dob, phone, address });
 
-      if (!dob || !phone || !address) {
-        throw new MapleradProviderError(
-          'Tier 1 upgrade requires dateOfBirth, Nigerian phone number, and structured address fields.',
-          'maplerad.customer.upgrade_tier1.prepare',
-          400,
-          'missing tier 1 kyc fields',
-          undefined,
-          { missing: { dob: !dob, phone: !phone, address: !address } },
-          'VALIDATION'
-        );
+      if (missingFields.length > 0 || !dob || !phone || !address) {
+        await this.updateCustomerTierReference(manager, user, customerId, beforeUpgrade, 'tier1_profile_incomplete', {
+          tier1EnrollmentState: 'PROFILE_INCOMPLETE',
+          missingFields,
+        });
+        return {
+          customerId,
+          customer: beforeUpgrade,
+          upgraded: false,
+          tier1: false,
+          state: 'PROFILE_INCOMPLETE',
+          missingFields,
+          code: 'MAPLERAD_TIER1_PROFILE_INCOMPLETE',
+        };
       }
 
-      await this.upgradeCustomerTier1({
-        customer_id: customerId,
-        dob,
-        identification_number: input.bvn,
-        phone,
-        address,
-        ...(input.photo ? { photo: input.photo } : {}),
+      await this.updateCustomerTierReference(manager, user, customerId, beforeUpgrade, 'tier1_processing', {
+        tier1EnrollmentState: 'PROCESSING',
+        missingFields: [],
       });
+
+      try {
+        await this.upgradeCustomerTier1({
+          customer_id: customerId,
+          dob,
+          identification_number: input.bvn,
+          phone,
+          address,
+          ...(input.photo ? { photo: input.photo } : {}),
+        });
+      } catch (error: any) {
+        const retryable = isMapleradProviderError(error) && ['TIMEOUT', 'NETWORK', 'RATE_LIMIT', 'PROVIDER'].includes(error.code);
+        await this.updateCustomerTierReference(manager, user, customerId, beforeUpgrade, retryable ? 'tier1_retrying' : 'tier1_failed', {
+          tier1EnrollmentState: retryable ? 'RETRYING' : 'FAILED',
+          lastTier1ProviderRequestId: isMapleradProviderError(error) ? error.requestId : undefined,
+          lastTier1ProviderStatus: isMapleradProviderError(error) ? error.providerStatus : undefined,
+          lastTier1ErrorCode: isMapleradProviderError(error) ? error.code : 'UNKNOWN',
+        });
+        await manager.getRepository(AuditLog).save(
+          manager.getRepository(AuditLog).create({
+            actorUserId: user.id,
+            targetUserId: user.id,
+            action: 'MAPLERAD_TIER1_ENROLLMENT_FAILED',
+            entityType: 'ProviderReference',
+            entityId: customerId,
+            metadata: this.sanitizeProviderPayload({
+              provider: 'maplerad',
+              providerEnvironment: this.environment,
+              state: retryable ? 'RETRYING' : 'FAILED',
+              providerStatus: isMapleradProviderError(error) ? error.providerStatus : undefined,
+              requestId: isMapleradProviderError(error) ? error.requestId : undefined,
+            }),
+          })
+        );
+        return {
+          customerId,
+          customer: beforeUpgrade,
+          upgraded: false,
+          tier1: false,
+          state: retryable ? 'RETRYING' : 'FAILED',
+          code: 'MAPLERAD_TIER1_ENROLLMENT_FAILED',
+          providerStatus: isMapleradProviderError(error) ? error.providerStatus : undefined,
+          providerMessage: isMapleradProviderError(error) ? error.providerMessage : undefined,
+          requestId: isMapleradProviderError(error) ? error.requestId : undefined,
+        };
+      }
 
       const upgradedCustomer = await this.getCustomerById(customerId);
       const tier1 = this.isTier1OrHigher(upgradedCustomer);
-      await this.updateCustomerTierReference(manager, user, customerId, upgradedCustomer, tier1 ? 'tier1_confirmed' : 'tier1_unconfirmed');
+      await this.updateCustomerTierReference(manager, user, customerId, upgradedCustomer, tier1 ? 'tier1_confirmed' : 'tier1_unconfirmed', {
+        tier1EnrollmentState: tier1 ? 'TIER_1' : 'RECONCILIATION_REQUIRED',
+      });
 
-      if (!tier1) {
-        throw new MapleradProviderError(
-          'Maplerad customer is not Tier 1 after BVN upgrade.',
-          'maplerad.customer.retrieve_after_tier1_upgrade',
-          400,
-          'customer is not Tier 1 after upgrade',
-          undefined,
-          this.customerTierSnapshot(upgradedCustomer),
-          'VALIDATION'
-        );
-      }
+      await manager.getRepository(AuditLog).save(
+        manager.getRepository(AuditLog).create({
+          actorUserId: user.id,
+          targetUserId: user.id,
+          action: tier1 ? 'MAPLERAD_TIER1_ENROLLMENT_CONFIRMED' : 'MAPLERAD_TIER1_RECONCILIATION_REQUIRED',
+          entityType: 'ProviderReference',
+          entityId: customerId,
+          metadata: {
+            provider: 'maplerad',
+            providerEnvironment: this.environment,
+            state: tier1 ? 'TIER_1' : 'RECONCILIATION_REQUIRED',
+          },
+        })
+      );
 
-      return { customerId, customer: upgradedCustomer, upgraded: true, tier1 };
+      return {
+        customerId,
+        customer: upgradedCustomer,
+        upgraded: true,
+        tier1,
+        state: tier1 ? 'TIER_1' : 'RECONCILIATION_REQUIRED',
+        code: tier1 ? undefined : 'MAPLERAD_TIER1_ENROLLMENT_FAILED',
+      };
     });
+  }
+
+  async ensureCustomerTier1ForBvn(userId: string, input: Tier1UpgradeInput, identity?: MapleradBvnVerificationResult['identity']) {
+    const result = await this.enrollMapleradCustomerTier1(userId, undefined, input, identity);
+    if (result.state === 'PROFILE_INCOMPLETE') {
+      throw new MapleradProviderError(
+        'Tier 1 upgrade requires documented profile fields.',
+        'maplerad.customer.upgrade_tier1.prepare',
+        400,
+        'missing tier 1 kyc fields',
+        undefined,
+        { missingFields: result.missingFields },
+        'VALIDATION'
+      );
+    }
+    if (!result.tier1) {
+      throw new MapleradProviderError(
+        'Maplerad customer is not Tier 1 after BVN upgrade.',
+        'maplerad.customer.upgrade_tier1',
+        result.providerStatus || 400,
+        result.providerMessage || 'customer is not Tier 1 after upgrade',
+        result.requestId,
+        { state: result.state },
+        'VALIDATION'
+      );
+    }
+    return result;
   }
 
   private async updateCustomerTierReference(
@@ -1460,7 +1597,8 @@ export class MapleRadService {
     user: User,
     customerId: string,
     customer: MapleradCustomer,
-    status: string
+    status: string,
+    metadata: Record<string, unknown> = {}
   ) {
     const repo = manager.getRepository(ProviderReference);
     const reference = await repo.findOne({ where: this.providerReferenceWhere(user.id) });
@@ -1480,6 +1618,7 @@ export class MapleRadService {
       ...(savedReference.metadata || {}),
       customerTier: this.customerTierSnapshot(customer),
       tier1VerifiedAt: status === 'tier1_confirmed' ? new Date().toISOString() : savedReference.metadata?.tier1VerifiedAt,
+      ...this.sanitizeProviderPayload(metadata),
     };
     await repo.save(savedReference);
   }

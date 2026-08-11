@@ -17,6 +17,10 @@ export const getUserProfile = async (req: Request, res: Response) => {
       nationality,
       dateOfBirth,
       address,
+      city,
+      state,
+      postalCode,
+      country,
     } = profile;
 
     // Respond with the necessary fields, set optional fields to null if not provided
@@ -29,9 +33,13 @@ export const getUserProfile = async (req: Request, res: Response) => {
       nationality: nationality || null,
       dateOfBirth: dateOfBirth || null,
       address: address || null,
+      city: city || null,
+      state: state || null,
+      postalCode: postalCode || null,
+      country: country || null,
     });
   } catch (error) {
-    res.status(500).json({ message: (error as Error).message });
+    res.status(400).json({ message: (error as Error).message });
   }
 };
 

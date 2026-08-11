@@ -91,14 +91,20 @@ document.components.schemas.ProfileUpdateRequest = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    gender: { type: 'string' },
     phoneNumber: { type: 'string' },
     country: { type: 'string', example: 'NG' },
-    nationality: { type: 'string' },
+    nationality: { type: 'string', example: 'NG' },
     dateOfBirth: { type: 'string', format: 'date' },
     address: { type: 'string' },
+    city: { type: 'string' },
+    state: { type: 'string' },
+    postalCode: { type: 'string' },
   },
 };
+
+for (const field of ['city', 'state', 'postalCode', 'country']) {
+  document.components.schemas.Profile.properties[field] = { type: 'string', nullable: true };
+}
 
 document.components.schemas.KycResultResponse = {
   type: 'object',
@@ -106,8 +112,33 @@ document.components.schemas.KycResultResponse = {
     message: { type: 'string' },
     code: { type: 'string', example: 'BVN_VERIFIED' },
     status: { type: 'string', enum: ['PASSED', 'FAILED'] },
+    accountTier: { type: 'string', enum: ['BVN_VERIFIED'] },
     verificationId: { type: 'string', format: 'uuid' },
     reused: { type: 'boolean' },
+    tier1Enrollment: {
+      type: 'object',
+      properties: {
+        state: {
+          type: 'string',
+          enum: ['NOT_STARTED', 'PROFILE_INCOMPLETE', 'PENDING', 'PROCESSING', 'TIER_1', 'RETRYING', 'RECONCILIATION_REQUIRED', 'FAILED'],
+        },
+        mapleradCustomerTier: { type: 'string', enum: ['TIER_1'] },
+        code: { type: 'string', enum: ['MAPLERAD_TIER1_PROFILE_INCOMPLETE', 'MAPLERAD_TIER1_ENROLLMENT_FAILED'] },
+        missingFields: {
+          type: 'array',
+          items: { type: 'string', enum: ['dateOfBirth', 'phoneNumber', 'address', 'city', 'state', 'country', 'postalCode'] },
+        },
+        providerStatus: { type: 'integer' },
+        requestId: { type: 'string' },
+      },
+    },
+    walletProvisioning: {
+      type: 'object',
+      properties: {
+        currency: { type: 'string', enum: ['NGN'] },
+        state: { type: 'string', enum: ['KYC_REQUIRED', 'PENDING', 'PROCESSING', 'RETRYING', 'FAILED', 'RECONCILIATION_REQUIRED', 'PROVISIONED'] },
+      },
+    },
   },
 };
 
@@ -245,7 +276,7 @@ document.components.schemas.WalletListResponse = {
   type: 'object',
   properties: {
     ok: { type: 'boolean' },
-    walletState: { type: 'string', enum: ['PROVISIONED', 'NOT_PROVISIONED', 'RECONCILIATION_REQUIRED'] },
+    walletState: { type: 'string', enum: ['PROVISIONED', 'PENDING_PROVISIONING', 'KYC_REQUIRED', 'NOT_PROVISIONED', 'RECONCILIATION_REQUIRED'] },
     wallets: {
       type: 'array',
       items: { $ref: '#/components/schemas/SafeWallet' },

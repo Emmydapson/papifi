@@ -4,6 +4,66 @@ import { User } from '../entities/User';
 import bcrypt from 'bcryptjs';
 import { sendPasswordChangeNotification } from '../services/emailNotification';
 
+const normalizeOptionalString = (value: unknown, field: string, maxLength = 120) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new Error(`${field} must be a string`);
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > maxLength) throw new Error(`${field} is too long`);
+  return trimmed;
+};
+
+const normalizeCountry = (value: unknown) => {
+  const normalized = normalizeOptionalString(value, 'country', 2);
+  if (normalized === undefined || normalized === null) return normalized;
+  const country = normalized.toUpperCase();
+  if (!/^[A-Z]{2}$/.test(country)) throw new Error('country must be an ISO 3166-1 alpha-2 code');
+  return country;
+};
+
+const normalizePostalCode = (value: unknown) => {
+  const normalized = normalizeOptionalString(value, 'postalCode', 20);
+  if (normalized === undefined || normalized === null) return normalized;
+  if (!/^[A-Za-z0-9 -]{3,20}$/.test(normalized)) throw new Error('postalCode contains invalid characters');
+  return normalized;
+};
+
+const normalizeDateOfBirth = (value: unknown) => {
+  const normalized = normalizeOptionalString(value, 'dateOfBirth', 10);
+  if (normalized === undefined || normalized === null) return normalized;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new Error('dateOfBirth must use YYYY-MM-DD');
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) throw new Error('dateOfBirth must be a valid date');
+  return normalized;
+};
+
+const normalizeProfileUpdate = (profileData: Partial<Profile>): Record<string, string | null | undefined> => {
+  const allowed = new Set([
+    'address',
+    'city',
+    'state',
+    'postalCode',
+    'phoneNumber',
+    'country',
+    'dateOfBirth',
+    'nationality',
+  ]);
+  for (const key of Object.keys(profileData)) {
+    if (!allowed.has(key)) throw new Error(`Cannot update ${key}`);
+  }
+  return {
+    address: normalizeOptionalString(profileData.address, 'address'),
+    city: normalizeOptionalString(profileData.city, 'city', 80),
+    state: normalizeOptionalString(profileData.state, 'state', 80),
+    postalCode: normalizePostalCode(profileData.postalCode),
+    phoneNumber: normalizeOptionalString(profileData.phoneNumber, 'phoneNumber', 20),
+    country: normalizeCountry(profileData.country),
+    dateOfBirth: normalizeDateOfBirth(profileData.dateOfBirth),
+    nationality: normalizeCountry(profileData.nationality),
+  };
+};
+
 // Get the user profile by userId
 export const getProfile = async (userId: string): Promise<Profile> => {
   const profileRepository = AppDataSource.getRepository(Profile);
@@ -55,7 +115,7 @@ export const updateProfile = async (
   }
 
   // Merge provided fields into the existing profile
-  Object.assign(profile, profileData);
+  Object.assign(profile, normalizeProfileUpdate(profileData));
 
   // Save the updated profile
   return profileRepository.save(profile);

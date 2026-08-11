@@ -61,10 +61,12 @@ KYC/BVN behavior:
 
 - Maplerad standalone BVN verification is interpreted as successful only when the HTTP request succeeds, the response body has `status: true`, and `data` is an object.
 - Provider errors such as validation failures, authentication failures, insufficient balance, and outages are returned as safe structured provider errors. They are not stored as proof that the user's BVN is invalid.
+- After BVN passes, the backend attempts Maplerad Tier 1 enrollment with `PATCH /v1/customers/upgrade/tier1`, then re-fetches the customer. A successful BVN remains `PASSED` even if Tier 1 enrollment is `PROFILE_INCOMPLETE`, `FAILED`, or `RETRYING`.
+- If `tier1Enrollment.state=PROFILE_INCOMPLETE`, the response lists only safe missing local fields such as `address`, `city`, `state`, `country`, `postalCode`, `dateOfBirth`, or `phoneNumber`. Do not call wallet creation in this state.
 - `GET /api/kyc/status` returns sanitized current KYC summaries only. It does not expose raw provider responses, full BVNs, names, DOBs, phone numbers, base64 identity images, document numbers, upload URLs, or internal notes.
 - `POST /api/wallet/create/{userId}`, `POST /api/wallet/create-usd/{userId}`, and `GET /api/wallet/balance/{userId}` allow normal users to access only their own user ID. Admin and super-admin roles may act on another user's ID.
 - Wallet creation reuses one Maplerad customer across NGN and USD. If Maplerad reports `customer is already enrolled`, the backend may run bounded exact-match recovery through documented customer pagination; smoke tests must use mocked provider responses unless an operator explicitly enables live Maplerad tests.
-- After successful BVN KYC, the response includes `walletProvisioning` for the default NGN wallet. Poll `GET /api/wallet/provisioning-status` or `GET /api/wallet/balance/{userId}` until `PROVISIONED`.
+- After successful BVN plus confirmed Maplerad Tier 1, the response includes `walletProvisioning` for the default NGN wallet. Poll `GET /api/wallet/provisioning-status` or `GET /api/wallet/balance/{userId}` until `PROVISIONED`.
 - `GET /api/wallet/balance/{userId}` returns `walletState` as `PROVISIONED`, `PENDING_PROVISIONING`, `KYC_REQUIRED`, `NOT_PROVISIONED`, or `RECONCILIATION_REQUIRED`.
 
 Against deployed staging:

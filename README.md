@@ -209,6 +209,18 @@ Account tiers:
 - `DOCUMENT_SUBMITTED`
 - `APPROVED`
 
+Papifi account tiers are local product tiers and are not Maplerad customer tiers. Maplerad Tier 1 status is tracked separately on the environment-scoped customer `ProviderReference` metadata as `tier1EnrollmentState`.
+
+Current onboarding sequence:
+
+```text
+Registration -> OTP -> PIN -> profile/KYC details -> BVN verification -> Maplerad Tier 1 enrollment -> NGN wallet provisioning
+```
+
+Maplerad Tier 1 enrollment uses the documented `PATCH /v1/customers/upgrade/tier1` endpoint after standalone `POST /v1/identity/bvn` succeeds. Required Tier 1 fields are `customer_id`, `dob` in `DD-MM-YYYY`, `identification_number` using the verified BVN, Nigerian `phone.phone_country_code` and `phone.phone_number`, and valid home `address.street`, `address.city`, `address.state`, `address.country`, and `address.postal_code`. `photo` is optional in the current Maplerad reference.
+
+Durable provider states are `NOT_STARTED`, `PROFILE_INCOMPLETE`, `PENDING`, `PROCESSING`, `TIER_1`, `RETRYING`, `RECONCILIATION_REQUIRED`, and `FAILED`. Automatic NGN provisioning is queued only after Maplerad Tier 1 is confirmed by provider customer retrieval; local BVN success alone is not enough.
+
 Limits are enforced before debit holds for withdrawals, transfers, and card funding. Defaults are defined in `limitService.ts`; `UNVERIFIED` users cannot debit funds. Daily withdrawal, transfer, card funding, and total debit checks are applied by tier.
 
 Risk controls:
@@ -286,7 +298,7 @@ Important API requirements:
 - Authenticated routes require `Authorization: Bearer <jwt>`.
 - Withdrawals, transfers, card funding, and card withdrawal require `Idempotency-Key`.
 - Maplerad webhooks require the configured signature header over the raw request body.
-- KYC uses Maplerad BVN verification plus document metadata collection for NIN, driver's license, international passport, and voter's card.
+- KYC uses Maplerad BVN verification, Maplerad Tier 1 customer enrollment, and document metadata collection for NIN, driver's license, international passport, and voter's card.
 
 ## Commands
 
