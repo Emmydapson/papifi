@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import crypto from 'crypto';
 import { KycVerification } from '../entities/KycVerification';
 import {
+  accountTierForTier1State,
   bvnFingerprint,
   bvnSuccessMetadata,
   normalizeBvnInput,
   serializeKycStatus,
+  walletStateForTier1State,
 } from '../services/kycService';
 
 const verification = (input: Partial<KycVerification>): KycVerification => ({
@@ -47,6 +49,13 @@ test('BVN fingerprint is keyed and stable without exposing the BVN', () => {
   assert.equal(first, second);
   assert.notEqual(first, different);
   assert.equal(first.includes('12345678901'), false);
+});
+
+test('Tier 1 state promotes account tier only after provider confirmation', () => {
+  assert.equal(accountTierForTier1State('TIER_1'), 'APPROVED');
+  assert.equal(accountTierForTier1State('PROFILE_INCOMPLETE'), 'BVN_VERIFIED');
+  assert.equal(accountTierForTier1State('RECONCILIATION_REQUIRED'), 'BVN_VERIFIED');
+  assert.equal(walletStateForTier1State('TIER_1'), 'PENDING');
 });
 
 test('success metadata stores safe provider audit fields only', () => {

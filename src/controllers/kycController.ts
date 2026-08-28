@@ -15,6 +15,7 @@ import {
   bvnFingerprint,
   bvnProviderErrorMetadata,
   bvnSuccessMetadata,
+  accountTierForTier1State,
   normalizeBvnInput,
   providerErrorAttemptOutcome,
   serializeKycStatus,
@@ -97,9 +98,13 @@ class KYCController {
             photo: req.body.photo,
           }
         );
-        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier: 'BVN_VERIFIED' });
-        const walletProvisioning = tier1Result.tier1
-          ? await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId)
+        const accountTier = accountTierForTier1State(tier1Result.state);
+        await userRepo.update({ id: userId }, { isKYCVerified: true, accountTier });
+        const walletProvisioningResult = tier1Result.tier1
+          ? await walletProvisioningService.provisionDefaultNgnWallet(userId, {
+              processNow: true,
+              actorUserId: userId,
+            })
           : undefined;
         return res.status(200).json({
           message: tier1Result.state === 'PROFILE_INCOMPLETE'
@@ -107,13 +112,13 @@ class KYCController {
             : 'BVN verified successfully.',
           code: 'BVN_VERIFIED',
           status: 'PASSED',
-          accountTier: 'BVN_VERIFIED',
+          accountTier,
           verificationId: existingPassed.id,
           reused: true,
           tier1Enrollment: tier1Response(tier1Result),
           walletProvisioning: {
             currency: 'NGN',
-            state: walletProvisioning?.state || walletStateForTier1State(tier1Result.state),
+            state: walletProvisioningResult?.job.state || walletStateForTier1State(tier1Result.state),
           },
         });
       }
@@ -187,11 +192,15 @@ class KYCController {
           mapleradTier1EnrollmentState: tier1Result.state,
         };
         await kycRepo.save(verification);
+        await userRepo.update({ id: userId }, { accountTier: accountTierForTier1State(tier1Result.state) });
       }
 
-      const walletProvisioning = passed
+      const walletProvisioningResult = passed
         && tier1Result?.tier1
-        ? await walletProvisioningService.enqueueDefaultNgnWalletProvisioning(userId)
+        ? await walletProvisioningService.provisionDefaultNgnWallet(userId, {
+            processNow: true,
+            actorUserId: userId,
+          })
         : undefined;
 
       return res.status(200).json({
@@ -202,10 +211,10 @@ class KYCController {
           : 'BVN verification failed.',
         code: providerResult.applicationCode,
         status: verification.status,
-        accountTier: passed ? 'BVN_VERIFIED' : undefined,
+        accountTier: passed ? accountTierForTier1State(tier1Result?.state) : undefined,
         tier1Enrollment: tier1Result ? tier1Response(tier1Result) : undefined,
         walletProvisioning: passed
-          ? walletResponse(walletProvisioning?.state || walletStateForTier1State(tier1Result?.state || 'NOT_STARTED'))
+          ? walletResponse(walletProvisioningResult?.job.state || walletStateForTier1State(tier1Result?.state || 'NOT_STARTED'))
           : undefined,
       });
     } catch (error: any) {

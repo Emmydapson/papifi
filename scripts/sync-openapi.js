@@ -112,7 +112,7 @@ document.components.schemas.KycResultResponse = {
     message: { type: 'string' },
     code: { type: 'string', example: 'BVN_VERIFIED' },
     status: { type: 'string', enum: ['PASSED', 'FAILED'] },
-    accountTier: { type: 'string', enum: ['BVN_VERIFIED'] },
+    accountTier: { type: 'string', enum: ['BVN_VERIFIED', 'APPROVED'] },
     verificationId: { type: 'string', format: 'uuid' },
     reused: { type: 'boolean' },
     tier1Enrollment: {

@@ -172,7 +172,7 @@ Papifi currently supports Maplerad BVN verification, Maplerad Tier 1 customer en
 
 1. Call `POST /api/kyc/start` to retrieve provider and supported document types.
 2. Collect profile/KYC details, especially `dateOfBirth`, Nigerian `phoneNumber`, and structured home address fields.
-3. Collect BVN and call `POST /api/kyc/bvn`. BVN verification is independent from Tier 1 enrollment and wallet provisioning.
+3. Collect BVN and call `POST /api/kyc/bvn`. When Maplerad confirms Tier 1, the backend marks the user `APPROVED` and immediately attempts default NGN wallet provisioning.
 4. If document collection is required, upload images to the client-approved storage flow and send metadata URLs to `POST /api/kyc/documents`.
 5. Poll or refresh with `GET /api/kyc/status` and `GET /api/wallet/provisioning-status`.
 
@@ -193,6 +193,25 @@ Frontend state mapping:
 - `TIER1_FAILED`: `tier1Enrollment.state` is `FAILED` or `RECONCILIATION_REQUIRED`.
 - `WALLET_PENDING`: `tier1Enrollment.state` is `TIER_1` and `walletProvisioning.state` is `PENDING`, `PROCESSING`, or `RETRYING`.
 - `WALLET_PROVISIONED`: `walletProvisioning.state` or `walletState` is `PROVISIONED`.
+
+Successful BVN with confirmed Tier 1:
+
+```json
+{
+  "message": "BVN verified successfully.",
+  "code": "BVN_VERIFIED",
+  "status": "PASSED",
+  "accountTier": "APPROVED",
+  "tier1Enrollment": {
+    "state": "TIER_1",
+    "mapleradCustomerTier": "TIER_1"
+  },
+  "walletProvisioning": {
+    "currency": "NGN",
+    "state": "PROVISIONED"
+  }
+}
+```
 
 Successful BVN with missing Tier 1 fields:
 
@@ -231,8 +250,8 @@ Wallet balance responses include `walletState`:
 - `PROVISIONED` when local wallets exist.
 - `PENDING_PROVISIONING` when the default NGN wallet job is pending, processing, or retrying.
 - `KYC_REQUIRED` when the user has no wallet and has not completed eligible KYC.
-- `NOT_PROVISIONED` when no local or provider-reference evidence exists.
-- `RECONCILIATION_REQUIRED` when a provider customer/account reference exists but local wallet rows are incomplete.
+- `NOT_PROVISIONED` when KYC is eligible but no local wallet or provider account evidence exists.
+- `RECONCILIATION_REQUIRED` when a provider account reference exists but local wallet rows are incomplete.
 
 Normal onboarding flow:
 

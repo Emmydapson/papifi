@@ -1445,6 +1445,7 @@ components:
           type: string
           enum:
             - BVN_VERIFIED
+            - APPROVED
         verificationId:
           type: string
           format: uuid

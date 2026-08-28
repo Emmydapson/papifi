@@ -95,6 +95,9 @@ const findOwnedWallet = (walletId: string, userId: string) =>
 const findOwnedCard = (cardId: string, userId: string) =>
   cardRepo.findOne({ where: { id: cardId, wallet: { user: { id: userId } } }, relations: ['wallet', 'wallet.user'] });
 
+const customerReferenceTier1Confirmed = (reference?: ProviderReference | null) =>
+  reference?.status === 'tier1_confirmed' || reference?.metadata?.tier1EnrollmentState === 'TIER_1';
+
 export const isWalletAdmin = (req: Request) => req.user?.role === 'admin' || req.user?.role === 'super_admin';
 export const requestedUserIdForOwnedRoute = (req: Request) => {
   const authenticatedUserId = req.user?.id;
@@ -185,25 +188,34 @@ router.get('/balance/:userId', async (req: Request, res: Response) => {
       return res.json({ ok: true, walletState: 'RECONCILIATION_REQUIRED', wallets: [] });
     }
 
-    const user = await userRepo.findOne({ where: { id: userId } });
-    if (!user?.isKYCVerified || user.accountTier !== 'APPROVED') {
-      return res.json({ ok: true, walletState: 'KYC_REQUIRED', wallets: [] });
-    }
-
-    const providerReferences = await providerReferenceRepo.find({
+    const customerReference = await providerReferenceRepo.findOne({
       where: {
         userId,
         provider: 'maplerad',
         providerEnvironment: mapleRadService.getEnvironment(),
+        referenceType: 'customer',
       },
     });
-    if (providerReferences.length > 0) {
+    const user = await userRepo.findOne({ where: { id: userId } });
+    if (!user?.isKYCVerified || (user.accountTier !== 'APPROVED' && !customerReferenceTier1Confirmed(customerReference))) {
+      return res.json({ ok: true, walletState: 'KYC_REQUIRED', wallets: [] });
+    }
+
+    const providerAccountReferences = await providerReferenceRepo.find({
+      where: {
+        userId,
+        provider: 'maplerad',
+        providerEnvironment: mapleRadService.getEnvironment(),
+        referenceType: 'account',
+      },
+    });
+    if (providerAccountReferences.length > 0) {
       logger.warn('wallet_balance_local_wallet_missing_for_provider_accounts', {
         userId,
         provider: 'maplerad',
         providerEnvironment: mapleRadService.getEnvironment(),
-        referenceTypes: providerReferences.map((reference) => reference.referenceType),
-        currencies: providerReferences.map((reference) => reference.currency).filter(Boolean),
+        referenceTypes: providerAccountReferences.map((reference) => reference.referenceType),
+        currencies: providerAccountReferences.map((reference) => reference.currency).filter(Boolean),
       });
       return res.json({ ok: true, wallets: [], walletState: 'RECONCILIATION_REQUIRED' });
     }

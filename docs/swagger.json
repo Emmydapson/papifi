@@ -2188,7 +2188,8 @@
           "accountTier": {
             "type": "string",
             "enum": [
-              "BVN_VERIFIED"
+              "BVN_VERIFIED",
+              "APPROVED"
             ]
           },
           "verificationId": {

@@ -125,6 +125,9 @@ export const walletStateForTier1State = (state: Tier1EnrollmentState) => {
   return 'KYC_REQUIRED';
 };
 
+export const accountTierForTier1State = (state?: Tier1EnrollmentState): 'APPROVED' | 'BVN_VERIFIED' =>
+  state === 'TIER_1' ? 'APPROVED' : 'BVN_VERIFIED';
+
 const dateOrUndefined = (value: unknown): string | undefined => {
   if (!value) return undefined;
   if (value instanceof Date) return value.toISOString();
