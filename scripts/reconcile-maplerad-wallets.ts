@@ -28,6 +28,13 @@ function currencyOf(account: any): Currency | undefined {
   return currency === 'NGN' || currency === 'USD' ? currency : undefined;
 }
 
+function usdAccountStatusOf(status: unknown): Wallet['usdAccountStatus'] | undefined {
+  const normalized = String(status || '').trim().toLowerCase();
+  if (!normalized) return 'pending';
+  if (normalized === 'pending' || normalized === 'approved' || normalized === 'rejected') return normalized;
+  return undefined;
+}
+
 async function main() {
   const userId = argValue('--user-id');
   const requestedEnvironment = argValue('--environment');
@@ -134,7 +141,7 @@ async function main() {
             accountNumber: item.account.account_number,
             bankName: item.bankName,
             usdAccountId: item.currency === 'USD' ? item.providerAccountId : undefined,
-            usdAccountStatus: item.currency === 'USD' ? String(item.account.status || 'pending') : undefined,
+            usdAccountStatus: item.currency === 'USD' ? usdAccountStatusOf(item.account.status) : undefined,
           });
           await manager.getRepository(Wallet).save(wallet);
         }
