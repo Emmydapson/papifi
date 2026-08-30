@@ -91,7 +91,12 @@ type MapleradVirtualAccountCreateResponseShape = {
   endpoint: string;
   httpStatus: number;
   providerRequestId?: string;
+  providerCorrelationIds: Record<string, string>;
+  ackStatusPresent: boolean;
+  ackStatusType: string;
   ackStatus?: string;
+  ackMessagePresent: boolean;
+  ackMessageType: string;
   ackMessage?: string;
   topLevelKeys: string[];
   dataLevelKeys: string[];
@@ -136,6 +141,13 @@ export type MapleradCustomerAccountsResponseShape = {
   recognizedCollectionKey: MapleradCustomerAccountsCollectionKey;
   recognizedCollectionLength: number;
   firstItemKeys: string[];
+};
+
+export type MapleradNgnVirtualBankSelection = {
+  configuredBankCode?: string;
+  configured: boolean;
+  appearsInVirtualInstitutions: boolean;
+  virtualInstitutionsCount: number;
 };
 
 type MapleradRequestOptions = {
@@ -1366,6 +1378,33 @@ export class MapleRadService {
       .slice(0, 200);
   }
 
+  private diagnosticValueType(value: unknown) {
+    if (value === undefined) return 'undefined';
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+    return typeof value;
+  }
+
+  private providerCorrelationIds(headers: unknown) {
+    const record = this.objectRecord(headers);
+    if (!record) return {};
+    const allowed = [
+      'x-request-id',
+      'x-amzn-requestid',
+      'request-id',
+      'x-correlation-id',
+      'correlation-id',
+      'x-trace-id',
+      'trace-id',
+      'traceparent',
+    ];
+    return Object.fromEntries(
+      allowed
+        .map((key) => [key, this.diagnosticString(record[key])] as const)
+        .filter((entry): entry is readonly [string, string] => Boolean(entry[1]))
+    );
+  }
+
   private requireNgnVirtualBankCode() {
     const code = this.config.ngnVirtualBankCode;
     if (!code) {
@@ -1427,6 +1466,8 @@ export class MapleRadService {
     const root = this.objectRecord(body);
     const data = this.objectRecord(root?.data);
     const nestedData = this.objectRecord(data?.data);
+    const ackStatusValue = root?.status;
+    const ackMessageValue = root?.message;
     const account = this.objectChild(root, 'account');
     const virtualAccount = this.objectChild(root, 'virtual_account');
     const dataAccount = this.objectChild(data, 'account');
@@ -1455,8 +1496,13 @@ export class MapleRadService {
       endpoint: input.endpoint,
       httpStatus: input.httpStatus,
       providerRequestId: input.providerRequestId,
-      ackStatus: this.diagnosticString(root?.status),
-      ackMessage: this.diagnosticString(root?.message),
+      providerCorrelationIds: {},
+      ackStatusPresent: this.hasObjectKey(root, 'status'),
+      ackStatusType: this.diagnosticValueType(ackStatusValue),
+      ackStatus: this.diagnosticString(ackStatusValue),
+      ackMessagePresent: this.hasObjectKey(root, 'message'),
+      ackMessageType: this.diagnosticValueType(ackMessageValue),
+      ackMessage: this.diagnosticString(ackMessageValue),
       topLevelKeys: this.objectKeys(body),
       dataLevelKeys: this.objectKeys(data),
       nestedDataLevelKeys: this.objectKeys(nestedData),
@@ -1498,15 +1544,17 @@ export class MapleRadService {
     endpoint: string;
     response: AxiosResponse<unknown>;
   }) {
+    const shape = this.virtualAccountCreateResponseShape({
+      operation: input.operation,
+      endpoint: input.endpoint,
+      httpStatus: input.response.status,
+      providerRequestId: this.providerRequestId(input.response.headers),
+      body: input.response.data,
+    });
+    shape.providerCorrelationIds = this.providerCorrelationIds(input.response.headers);
     logger.info(
       'maplerad_virtual_account_create_response_shape',
-      this.virtualAccountCreateResponseShape({
-        operation: input.operation,
-        endpoint: input.endpoint,
-        httpStatus: input.response.status,
-        providerRequestId: this.providerRequestId(input.response.headers),
-        body: input.response.data,
-      })
+      shape
     );
   }
 
@@ -1561,6 +1609,19 @@ export class MapleRadService {
     const shape = this.customerAccountsResponseShape(response);
     logger.info('maplerad_customer_accounts_response_shape', shape);
     return shape;
+  }
+
+  async inspectNgnVirtualBankSelection(institutions?: MapleradInstitution[]): Promise<MapleradNgnVirtualBankSelection> {
+    const configuredBankCode = this.config.ngnVirtualBankCode;
+    const virtualInstitutions = institutions || await this.listNgnVirtualInstitutions();
+    const selection = {
+      configuredBankCode,
+      configured: Boolean(configuredBankCode),
+      appearsInVirtualInstitutions: Boolean(configuredBankCode && virtualInstitutions.some((institution) => institution.code === configuredBankCode)),
+      virtualInstitutionsCount: virtualInstitutions.length,
+    };
+    logger.info('maplerad_ngn_virtual_bank_selection', selection);
+    return selection;
   }
 
   private institutionCollection(data: any): unknown[] {
@@ -2374,7 +2435,14 @@ export class MapleRadService {
         const operation = 'maplerad.virtual_account.create';
         const endpoint = '/collections/virtual-account';
         createDiagnostics = { operation, endpoint };
-        const payload = { customer_id: customerId, currency, preferred_bank: this.requireNgnVirtualBankCode() };
+        const preferredBank = this.requireNgnVirtualBankCode();
+        logger.info('maplerad_virtual_account_create_preflight', {
+          operation,
+          endpoint,
+          customerTier1OrHigher: this.isTier1OrHigher(customer),
+          selectedVirtualBankCode: preferredBank,
+        });
+        const payload = { customer_id: customerId, currency, preferred_bank: preferredBank };
         const response = await this.requestMapleradRaw<MapleradVirtualAccount>({
           operation,
           method: 'POST',

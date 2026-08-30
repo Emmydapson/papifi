@@ -402,6 +402,23 @@ test('customer accounts diagnostic returns response shape without item values', 
   assert.equal(JSON.stringify(shape).includes('acct_1'), false);
 });
 
+test('NGN virtual bank selection diagnostic reports configured code presence', async () => {
+  const service = serviceWithMockedRequest(async () => null, true);
+  (service as any).config.ngnVirtualBankCode = '244';
+
+  const selection = await service.inspectNgnVirtualBankSelection([
+    { code: '238', name: 'Kuda' },
+    { code: '244', name: 'Guaranty Trust Bank' },
+  ]);
+
+  assert.deepEqual(selection, {
+    configuredBankCode: '244',
+    configured: true,
+    appearsInVirtualInstitutions: true,
+    virtualInstitutionsCount: 2,
+  });
+});
+
 test('ensureMapleRadCustomer reuses existing reference instead of creating duplicates', async () => {
   const service = serviceWithMockedRequest(async () => null);
   const calls: string[] = [];
