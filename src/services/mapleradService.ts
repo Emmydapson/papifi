@@ -62,6 +62,7 @@ type MapleradVirtualAccount = {
 };
 
 type MapleradVirtualAccountCollectionKey = 'root' | 'accounts' | 'items' | 'virtual_accounts';
+type MapleradCustomerAccountsCollectionKey = 'root' | 'data' | 'accounts' | 'items' | null;
 
 type MapleradVirtualAccountResponseShape = {
   operation: string;
@@ -83,6 +84,8 @@ type MapleradVirtualAccountCreateResponseShape = {
   endpoint: string;
   httpStatus: number;
   providerRequestId?: string;
+  ackStatus?: string;
+  ackMessage?: string;
   topLevelKeys: string[];
   dataLevelKeys: string[];
   nestedDataLevelKeys: string[];
@@ -116,6 +119,16 @@ type MapleradVirtualAccountCreateResponseShape = {
   hasAccountIdCamel: boolean;
   hasVirtualAccountNumberCamel: boolean;
   hasVirtualAccountIdCamel: boolean;
+};
+
+export type MapleradCustomerAccountsResponseShape = {
+  httpStatus: number;
+  providerRequestId?: string;
+  topLevelKeys: string[];
+  dataLevelKeys: string[];
+  recognizedCollectionKey: MapleradCustomerAccountsCollectionKey;
+  recognizedCollectionLength: number;
+  firstItemKeys: string[];
 };
 
 type MapleradRequestOptions = {
@@ -1322,6 +1335,19 @@ export class MapleRadService {
     return record && Object.prototype.hasOwnProperty.call(record, 'data') ? record.data : body;
   }
 
+  private diagnosticString(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const stripped = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ');
+    return stripped
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+      .replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, '[redacted-id]')
+      .replace(/\b(?:cus|cust|customer|acct|account|va|wallet|ref)_[A-Za-z0-9_-]{6,}\b/gi, '[redacted-id]')
+      .replace(/\b(?:sk|pk|secret|token|bearer|key)_[A-Za-z0-9_-]{6,}\b/gi, '[redacted-secret]')
+      .replace(/\b(?:\+?\d[\d\s().-]{7,}\d)\b/g, '[redacted-number]')
+      .replace(/\b\d{8,}\b/g, '[redacted-number]')
+      .slice(0, 200);
+  }
+
   private hasAnyVirtualAccountIdentityKey(value: unknown) {
     return ['id', 'account_id', 'reference', 'account_number', 'accountId', 'accountNumber'].some((key) =>
       this.hasObjectKey(value, key)
@@ -1372,6 +1398,8 @@ export class MapleRadService {
       endpoint: input.endpoint,
       httpStatus: input.httpStatus,
       providerRequestId: input.providerRequestId,
+      ackStatus: this.diagnosticString(root?.status),
+      ackMessage: this.diagnosticString(root?.message),
       topLevelKeys: this.objectKeys(body),
       dataLevelKeys: this.objectKeys(data),
       nestedDataLevelKeys: this.objectKeys(nestedData),
@@ -1431,6 +1459,51 @@ export class MapleRadService {
     if (Array.isArray(data?.items)) return { key: 'items', items: data.items };
     if (Array.isArray(data?.virtual_accounts)) return { key: 'virtual_accounts', items: data.virtual_accounts };
     return { key: null, items: [] };
+  }
+
+  private customerAccountsCollection(body: unknown): { key: MapleradCustomerAccountsCollectionKey; items: unknown[] } {
+    const unwrapped = this.diagnosticUnwrapBody(body);
+    const root = this.objectRecord(body);
+    const data = this.objectRecord(root?.data);
+    if (Array.isArray(body)) return { key: 'root', items: body };
+    if (Array.isArray(unwrapped)) return { key: 'data', items: unwrapped };
+    if (Array.isArray(root?.accounts)) return { key: 'accounts', items: root.accounts };
+    if (Array.isArray(root?.items)) return { key: 'items', items: root.items };
+    if (Array.isArray(data?.accounts)) return { key: 'accounts', items: data.accounts };
+    if (Array.isArray(data?.items)) return { key: 'items', items: data.items };
+    return { key: null, items: [] };
+  }
+
+  private customerAccountsResponseShape(response: AxiosResponse<unknown>): MapleradCustomerAccountsResponseShape {
+    const body = response.data;
+    const root = this.objectRecord(body);
+    const collection = this.customerAccountsCollection(body);
+    return {
+      httpStatus: response.status,
+      providerRequestId: this.providerRequestId(response.headers),
+      topLevelKeys: this.objectKeys(body),
+      dataLevelKeys: this.objectKeys(root?.data),
+      recognizedCollectionKey: collection.key,
+      recognizedCollectionLength: collection.items.length,
+      firstItemKeys: collection.items.length ? this.objectKeys(collection.items[0]) : [],
+    };
+  }
+
+  private logCustomerAccountsResponseShape(response: AxiosResponse<unknown>) {
+    logger.info('maplerad_customer_accounts_response_shape', this.customerAccountsResponseShape(response));
+  }
+
+  async inspectCustomerAccountsResponseShape(customerId: string): Promise<MapleradCustomerAccountsResponseShape> {
+    const response = await this.requestMapleradRaw<unknown>({
+      operation: 'maplerad.customer.accounts.list_for_customer',
+      method: 'GET',
+      path: `/customers/${customerId}/accounts`,
+      logPath: '/customers/{customerId}/accounts',
+      onErrorResponse: (errorResponse) => this.logCustomerAccountsResponseShape(errorResponse),
+    });
+    const shape = this.customerAccountsResponseShape(response);
+    logger.info('maplerad_customer_accounts_response_shape', shape);
+    return shape;
   }
 
   getLastVirtualAccountListResponseShape() {

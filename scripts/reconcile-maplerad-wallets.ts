@@ -4,7 +4,11 @@ import { AuditLog } from '../src/entities/AuditLog';
 import { ProviderReference } from '../src/entities/ProviderReference';
 import { User } from '../src/entities/User';
 import { Currency, Wallet } from '../src/entities/Wallet';
-import { MapleRadService } from '../src/services/mapleradService';
+import {
+  isMapleradProviderError,
+  MapleRadService,
+  MapleradCustomerAccountsResponseShape,
+} from '../src/services/mapleradService';
 
 const args = process.argv.slice(2);
 
@@ -85,6 +89,21 @@ async function main() {
 
     const parsedProviderAccounts = await service.getCustomerVirtualAccounts(customerReference.providerCustomerId);
     const virtualAccountShape = service.getLastVirtualAccountListResponseShape();
+    let customerAccountsEndpointAvailable: 'yes' | 'no' | 'unknown' = 'unknown';
+    let customerAccountsHttpStatus: number | 'unknown' = 'unknown';
+    let customerAccountsShape: MapleradCustomerAccountsResponseShape | undefined;
+    if (!confirmed) {
+      try {
+        customerAccountsShape = await service.inspectCustomerAccountsResponseShape(customerReference.providerCustomerId);
+        customerAccountsEndpointAvailable = 'yes';
+        customerAccountsHttpStatus = customerAccountsShape.httpStatus;
+      } catch (error) {
+        if (isMapleradProviderError(error) && error.providerStatus) {
+          customerAccountsHttpStatus = error.providerStatus;
+          customerAccountsEndpointAvailable = error.providerStatus === 404 ? 'no' : 'unknown';
+        }
+      }
+    }
     const providerAccounts = parsedProviderAccounts.filter((account) => currencyOf(account));
     const byCurrency = new Map<Currency, any[]>();
     for (const account of providerAccounts) {
@@ -127,6 +146,21 @@ async function main() {
     console.log(`Provider virtual accounts parsed: ${parsedProviderAccounts.length}`);
     console.log(`Recognized response collection: ${virtualAccountShape?.recognizedCollectionKey || 'none'}`);
     console.log(`Candidate reconciliations: ${planned.length}`);
+    if (!confirmed) {
+      const customerAccountsCount = customerAccountsShape?.recognizedCollectionLength;
+      const providerResourceExists =
+        parsedProviderAccounts.length > 0 || (customerAccountsCount || 0) > 0
+          ? 'yes'
+          : customerAccountsShape
+          ? 'no'
+          : 'unknown';
+      console.log(`Customer accounts endpoint available: ${customerAccountsEndpointAvailable}`);
+      console.log(`Customer accounts HTTP status: ${customerAccountsHttpStatus}`);
+      console.log(`Customer accounts response shape: ${customerAccountsShape ? JSON.stringify(customerAccountsShape) : 'unknown'}`);
+      console.log(`Customer accounts count: ${customerAccountsCount ?? 'unknown'}`);
+      console.log(`Virtual account list count: ${parsedProviderAccounts.length}`);
+      console.log(`Provider resource exists anywhere?: ${providerResourceExists}`);
+    }
     for (const item of planned) {
       console.log(`${item.currency}: createWallet=${item.createWallet ? 'yes' : 'no'} createProviderReference=${item.createProviderReference ? 'yes' : 'no'}`);
     }

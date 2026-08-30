@@ -350,6 +350,57 @@ test('provider request failure logs safe metadata only', async () => {
   assert.doesNotMatch(joined, /Ada/);
 });
 
+test('virtual account create acknowledgement diagnostics redact unsafe status and message values', () => {
+  const service = serviceWithMockedRequest(async () => null, true);
+  const shape = (service as any).virtualAccountCreateResponseShape({
+    operation: 'maplerad.virtual_account.create',
+    endpoint: '/collections/virtual-account',
+    httpStatus: 200,
+    providerRequestId: 'req-safe',
+    body: {
+      status: 'success for account 1234567890',
+      message:
+        'request received for ada@example.com +2348012345678 9875f02e-2b82-4269-98a8-79eacc7ceb30 sk_test_secret',
+    },
+  });
+
+  assert.equal(shape.providerRequestId, 'req-safe');
+  assert.equal(shape.ackStatus.includes('1234567890'), false);
+  assert.equal(shape.ackMessage.includes('ada@example.com'), false);
+  assert.equal(shape.ackMessage.includes('+2348012345678'), false);
+  assert.equal(shape.ackMessage.includes('9875f02e-2b82-4269-98a8-79eacc7ceb30'), false);
+  assert.equal(shape.ackMessage.includes('sk_test_secret'), false);
+  assert.ok(shape.ackStatus.length <= 200);
+  assert.ok(shape.ackMessage.length <= 200);
+});
+
+test('customer accounts diagnostic returns response shape without item values', async () => {
+  const service = serviceWithMockedRequest(async () => ({
+    status: 200,
+    headers: { 'x-request-id': 'req-accounts' },
+    data: {
+      status: 'success',
+      data: {
+        accounts: [
+          { id: 'acct_1', account_number: '1234567890', currency: 'NGN' },
+        ],
+      },
+    },
+  }), true);
+
+  const shape = await service.inspectCustomerAccountsResponseShape('cus_test');
+
+  assert.equal(shape.httpStatus, 200);
+  assert.equal(shape.providerRequestId, 'req-accounts');
+  assert.deepEqual(shape.topLevelKeys, ['data', 'status']);
+  assert.deepEqual(shape.dataLevelKeys, ['accounts']);
+  assert.equal(shape.recognizedCollectionKey, 'accounts');
+  assert.equal(shape.recognizedCollectionLength, 1);
+  assert.deepEqual(shape.firstItemKeys, ['account_number', 'currency', 'id']);
+  assert.equal(JSON.stringify(shape).includes('1234567890'), false);
+  assert.equal(JSON.stringify(shape).includes('acct_1'), false);
+});
+
 test('ensureMapleRadCustomer reuses existing reference instead of creating duplicates', async () => {
   const service = serviceWithMockedRequest(async () => null);
   const calls: string[] = [];
