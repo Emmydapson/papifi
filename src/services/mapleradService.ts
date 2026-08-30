@@ -78,6 +78,46 @@ type MapleradVirtualAccountResponseShape = {
   firstCollectionItemKeys: string[];
 };
 
+type MapleradVirtualAccountCreateResponseShape = {
+  operation: string;
+  endpoint: string;
+  httpStatus: number;
+  providerRequestId?: string;
+  topLevelKeys: string[];
+  dataLevelKeys: string[];
+  nestedDataLevelKeys: string[];
+  bodyIsArray: boolean;
+  unwrappedIsArray: boolean;
+  accountObjectLocation: string | null;
+  rootKeys: string[];
+  accountKeys: string[];
+  virtualAccountKeys: string[];
+  dataAccountKeys: string[];
+  dataVirtualAccountKeys: string[];
+  nestedDataAccountKeys: string[];
+  nestedDataVirtualAccountKeys: string[];
+  hasRootId: boolean;
+  hasRootAccountId: boolean;
+  hasRootReference: boolean;
+  hasRootAccountNumber: boolean;
+  hasAccountObject: boolean;
+  hasVirtualAccountObject: boolean;
+  hasAccountId: boolean;
+  hasAccountAccountId: boolean;
+  hasAccountReference: boolean;
+  hasAccountAccountNumber: boolean;
+  hasVirtualAccountId: boolean;
+  hasVirtualAccountAccountId: boolean;
+  hasVirtualAccountReference: boolean;
+  hasVirtualAccountAccountNumber: boolean;
+  hasRootAccountNumberCamel: boolean;
+  hasRootAccountIdCamel: boolean;
+  hasAccountNumberCamel: boolean;
+  hasAccountIdCamel: boolean;
+  hasVirtualAccountNumberCamel: boolean;
+  hasVirtualAccountIdCamel: boolean;
+};
+
 type MapleradRequestOptions = {
   operation: string;
   method: 'GET' | 'POST' | 'PATCH';
@@ -85,6 +125,7 @@ type MapleradRequestOptions = {
   logPath?: string;
   payload?: unknown;
   params?: Record<string, unknown>;
+  onErrorResponse?: (response: AxiosResponse<unknown>) => void;
 };
 
 export type MapleradProviderErrorCode =
@@ -588,6 +629,9 @@ export class MapleRadService {
       });
       return res;
     } catch (error: any) {
+      if (error?.response && options.onErrorResponse) {
+        options.onErrorResponse(error.response);
+      }
       const status = error?.response?.status;
       const safeBody = this.sanitizeProviderPayload(error?.response?.data);
       const providerMessage = this.providerMessage(error?.response?.data);
@@ -1256,8 +1300,129 @@ export class MapleRadService {
     });
   }
 
+  private objectRecord(value: unknown): Record<string, unknown> | undefined {
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  }
+
   private objectKeys(value: unknown) {
-    return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value as Record<string, unknown>).sort() : [];
+    return this.objectRecord(value) ? Object.keys(value as Record<string, unknown>).sort() : [];
+  }
+
+  private objectChild(value: unknown, key: string): Record<string, unknown> | undefined {
+    return this.objectRecord(this.objectRecord(value)?.[key]);
+  }
+
+  private hasObjectKey(value: unknown, key: string) {
+    const record = this.objectRecord(value);
+    return Boolean(record && Object.prototype.hasOwnProperty.call(record, key));
+  }
+
+  private diagnosticUnwrapBody(body: unknown) {
+    const record = this.objectRecord(body);
+    return record && Object.prototype.hasOwnProperty.call(record, 'data') ? record.data : body;
+  }
+
+  private hasAnyVirtualAccountIdentityKey(value: unknown) {
+    return ['id', 'account_id', 'reference', 'account_number', 'accountId', 'accountNumber'].some((key) =>
+      this.hasObjectKey(value, key)
+    );
+  }
+
+  private firstObject(candidates: Array<Record<string, unknown> | undefined>) {
+    return candidates.find(Boolean);
+  }
+
+  private virtualAccountCreateResponseShape(input: {
+    operation: string;
+    endpoint: string;
+    httpStatus: number;
+    providerRequestId?: string;
+    body: unknown;
+  }): MapleradVirtualAccountCreateResponseShape {
+    const body = input.body;
+    const unwrapped = this.diagnosticUnwrapBody(body);
+    const root = this.objectRecord(body);
+    const data = this.objectRecord(root?.data);
+    const nestedData = this.objectRecord(data?.data);
+    const account = this.objectChild(root, 'account');
+    const virtualAccount = this.objectChild(root, 'virtual_account');
+    const dataAccount = this.objectChild(data, 'account');
+    const dataVirtualAccount = this.objectChild(data, 'virtual_account');
+    const nestedDataAccount = this.objectChild(nestedData, 'account');
+    const nestedDataVirtualAccount = this.objectChild(nestedData, 'virtual_account');
+    const accountObject = this.firstObject([account, dataAccount, nestedDataAccount]);
+    const virtualAccountObject = this.firstObject([virtualAccount, dataVirtualAccount, nestedDataVirtualAccount]);
+    const accountObjectLocation =
+      ([
+        ['root', root],
+        ['account', account],
+        ['virtual_account', virtualAccount],
+        ['data', data],
+        ['data.account', dataAccount],
+        ['data.virtual_account', dataVirtualAccount],
+        ['data.data', nestedData],
+        ['data.data.account', nestedDataAccount],
+        ['data.data.virtual_account', nestedDataVirtualAccount],
+      ] as Array<[string, Record<string, unknown> | undefined]>).find(([_location, value]) =>
+        this.hasAnyVirtualAccountIdentityKey(value)
+      )?.[0] || null;
+
+    return {
+      operation: input.operation,
+      endpoint: input.endpoint,
+      httpStatus: input.httpStatus,
+      providerRequestId: input.providerRequestId,
+      topLevelKeys: this.objectKeys(body),
+      dataLevelKeys: this.objectKeys(data),
+      nestedDataLevelKeys: this.objectKeys(nestedData),
+      bodyIsArray: Array.isArray(body),
+      unwrappedIsArray: Array.isArray(unwrapped),
+      accountObjectLocation,
+      rootKeys: this.objectKeys(root),
+      accountKeys: this.objectKeys(account),
+      virtualAccountKeys: this.objectKeys(virtualAccount),
+      dataAccountKeys: this.objectKeys(dataAccount),
+      dataVirtualAccountKeys: this.objectKeys(dataVirtualAccount),
+      nestedDataAccountKeys: this.objectKeys(nestedDataAccount),
+      nestedDataVirtualAccountKeys: this.objectKeys(nestedDataVirtualAccount),
+      hasRootId: this.hasObjectKey(root, 'id'),
+      hasRootAccountId: this.hasObjectKey(root, 'account_id'),
+      hasRootReference: this.hasObjectKey(root, 'reference'),
+      hasRootAccountNumber: this.hasObjectKey(root, 'account_number'),
+      hasAccountObject: Boolean(accountObject),
+      hasVirtualAccountObject: Boolean(virtualAccountObject),
+      hasAccountId: this.hasObjectKey(accountObject, 'id'),
+      hasAccountAccountId: this.hasObjectKey(accountObject, 'account_id'),
+      hasAccountReference: this.hasObjectKey(accountObject, 'reference'),
+      hasAccountAccountNumber: this.hasObjectKey(accountObject, 'account_number'),
+      hasVirtualAccountId: this.hasObjectKey(virtualAccountObject, 'id'),
+      hasVirtualAccountAccountId: this.hasObjectKey(virtualAccountObject, 'account_id'),
+      hasVirtualAccountReference: this.hasObjectKey(virtualAccountObject, 'reference'),
+      hasVirtualAccountAccountNumber: this.hasObjectKey(virtualAccountObject, 'account_number'),
+      hasRootAccountNumberCamel: this.hasObjectKey(root, 'accountNumber'),
+      hasRootAccountIdCamel: this.hasObjectKey(root, 'accountId'),
+      hasAccountNumberCamel: this.hasObjectKey(accountObject, 'accountNumber'),
+      hasAccountIdCamel: this.hasObjectKey(accountObject, 'accountId'),
+      hasVirtualAccountNumberCamel: this.hasObjectKey(virtualAccountObject, 'accountNumber'),
+      hasVirtualAccountIdCamel: this.hasObjectKey(virtualAccountObject, 'accountId'),
+    };
+  }
+
+  private logVirtualAccountCreateResponseShape(input: {
+    operation: string;
+    endpoint: string;
+    response: AxiosResponse<unknown>;
+  }) {
+    logger.info(
+      'maplerad_virtual_account_create_response_shape',
+      this.virtualAccountCreateResponseShape({
+        operation: input.operation,
+        endpoint: input.endpoint,
+        httpStatus: input.response.status,
+        providerRequestId: this.providerRequestId(input.response.headers),
+        body: input.response.data,
+      })
+    );
   }
 
   private virtualAccountCollection(data: any): { key: MapleradVirtualAccountCollectionKey | null; items: MapleradVirtualAccount[] } {
@@ -2050,16 +2215,29 @@ export class MapleRadService {
 
       const providerAccounts = await this.getCustomerVirtualAccounts(customerId);
       let data = this.findUniqueProviderVirtualAccount(providerAccounts, currency);
+      let createDiagnostics: { operation: string; endpoint: string } | undefined;
 
       if (!data) {
+        const operation = 'maplerad.virtual_account.create';
+        const endpoint = '/collections/virtual-account';
+        createDiagnostics = { operation, endpoint };
         const payload = { customer_id: customerId, currency, preferred_bank: process.env.MAPLERAD_NGN_PREFERRED_BANK };
         if (!payload.preferred_bank) delete (payload as Partial<typeof payload>).preferred_bank;
-        data = await this.requestMaplerad<MapleradVirtualAccount>({
-          operation: 'maplerad.virtual_account.create',
+        const response = await this.requestMapleradRaw<MapleradVirtualAccount>({
+          operation,
           method: 'POST',
-          path: '/collections/virtual-account',
+          path: endpoint,
           payload,
+          onErrorResponse: (errorResponse) => this.logVirtualAccountCreateResponseShape({ operation, endpoint, response: errorResponse }),
         });
+        logger.info('maplerad_virtual_account_create_received', {
+          operation,
+          endpoint,
+          httpStatus: response.status,
+          providerRequestId: this.providerRequestId(response.headers),
+        });
+        this.logVirtualAccountCreateResponseShape({ operation, endpoint, response });
+        data = this.unwrap<MapleradVirtualAccount>(response);
       }
 
       if (!data?.account_number) {
@@ -2073,8 +2251,18 @@ export class MapleRadService {
           'SCHEMA'
         );
       }
+      if (createDiagnostics) {
+        logger.info('maplerad_virtual_account_parse_succeeded', createDiagnostics);
+      }
 
-      return this.upsertWalletAndAccountReference(manager, user, customerId, data, currency);
+      if (createDiagnostics) {
+        logger.info('maplerad_virtual_account_persist_started', createDiagnostics);
+      }
+      const wallet = await this.upsertWalletAndAccountReference(manager, user, customerId, data, currency);
+      if (createDiagnostics) {
+        logger.info('maplerad_virtual_account_persist_succeeded', createDiagnostics);
+      }
+      return wallet;
     });
   }
 

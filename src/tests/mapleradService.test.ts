@@ -738,9 +738,13 @@ test('createVirtualAccountForUser sends top-level customer_id after Tier 1 prefl
   (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
   (service as any).getCustomerById = async () => ({ id: 'cus_1', tier: '1' });
   (service as any).getCustomerVirtualAccounts = async () => [];
-  (service as any).requestMaplerad = async (options: any) => {
+  (service as any).requestMapleradRaw = async (options: any) => {
     observed = options;
-    return { id: 'acct_1', account_number: '1234567890', bank_name: 'Test Bank', currency: 'NGN' };
+    return {
+      status: 200,
+      headers: { 'x-request-id': 'req-wallet-create' },
+      data: { id: 'acct_1', account_number: '1234567890', bank_name: 'Test Bank', currency: 'NGN' },
+    };
   };
 
   try {
@@ -755,7 +759,17 @@ test('createVirtualAccountForUser sends top-level customer_id after Tier 1 prefl
 });
 
 test('createVirtualAccountForUser continues with newly extracted customer id and persists it', async () => {
-  const service = serviceWithMockedRequest(async () => ({
+  let virtualAccountRequest: any;
+  const service = serviceWithMockedRequest(async (options) => {
+    if (options.operation === 'maplerad.virtual_account.create') {
+      virtualAccountRequest = options;
+      return {
+        status: 200,
+        headers: { 'x-request-id': 'req-wallet-create' },
+        data: { id: 'acct_wallet', account_number: '1234567890', bank_name: 'Test Bank', currency: 'NGN' },
+      };
+    }
+    return {
     status: 200,
     headers: { 'x-request-id': 'req-customer-wallet' },
     data: {
@@ -763,13 +777,13 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
       message: 'Customer created',
       data: { customer: { id: 'cus_wallet', email: 'ada@example.com', first_name: 'Ada', last_name: 'Okafor' } },
     },
-  }), true);
+    };
+  }, true);
   (service as any).activeRecoveryCooldown = async () => undefined;
   const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
   const user = { id: 'user-1', email: 'ada@example.com', firstName: 'Ada', lastName: 'Okafor' };
   const references: any[] = [];
   let savedWallet: any;
-  let virtualAccountRequest: any;
   const walletRepo: any = {
     findOne: async () => null,
     create: (value: any) => value,
@@ -814,11 +828,6 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
     assert.equal(customerId, 'cus_wallet');
     return [];
   };
-  (service as any).requestMaplerad = async (options: any) => {
-    virtualAccountRequest = options;
-    return { id: 'acct_wallet', account_number: '1234567890', bank_name: 'Test Bank', currency: 'NGN' };
-  };
-
   try {
     await service.createVirtualAccountForUser('user-1', 'NGN');
   } finally {
