@@ -61,6 +61,13 @@ type MapleradVirtualAccount = {
   customer_id?: string;
 };
 
+export type MapleradInstitution = {
+  name?: string;
+  code?: string;
+  type?: string;
+  country?: string;
+};
+
 type MapleradVirtualAccountCollectionKey = 'root' | 'accounts' | 'items' | 'virtual_accounts';
 type MapleradCustomerAccountsCollectionKey = 'root' | 'data' | 'accounts' | 'items' | null;
 
@@ -168,6 +175,7 @@ export type MapleradApplicationErrorCode =
   | 'MAPLERAD_CUSTOMER_AMBIGUOUS'
   | 'MAPLERAD_CUSTOMER_IDENTITY_MISMATCH'
   | 'MAPLERAD_CUSTOMER_RECOVERY_PROFILE_INCOMPLETE'
+  | 'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED'
   | 'MAPLERAD_VALIDATION_ERROR'
   | 'MAPLERAD_CONTRACT_ERROR'
   | 'MAPLERAD_RATE_LIMITED'
@@ -234,6 +242,7 @@ export const mapleradErrorToHttpStatus = (error: unknown) => {
   if (error instanceof MapleradCustomerRecoveryError) return 400;
   if (mapleradErrorToApplicationCode(error) === 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED') return 400;
   if (mapleradErrorToApplicationCode(error) === 'CUSTOMER_NOT_TIER1') return 400;
+  if (mapleradErrorToApplicationCode(error) === 'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED') return 502;
   if (error.code === 'VALIDATION') return error.providerStatus === 422 ? 422 : 400;
   if (error.code === 'AUTH') return 502;
   if (error.code === 'NOT_FOUND') return 400;
@@ -249,6 +258,13 @@ export const mapleradErrorToApplicationCode = (error: unknown): MapleradApplicat
   const message = String(error.providerMessage || '').toLowerCase();
   if (error.operation === 'maplerad.customer.upgrade_tier1.prepare') return 'MAPLERAD_TIER1_PROFILE_INCOMPLETE';
   if (error.operation.includes('maplerad.customer.upgrade_tier1')) return 'MAPLERAD_TIER1_ENROLLMENT_FAILED';
+  if (
+    error.operation === 'maplerad.virtual_account.create.prepare' ||
+    message.includes('please specify a bank code') ||
+    message.includes('maplerad_ngn_virtual_bank_not_configured')
+  ) {
+    return 'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED';
+  }
   if (error.operation === 'maplerad.customer.create' && message.includes('already enrolled')) {
     return 'MAPLERAD_CUSTOMER_RECONCILIATION_REQUIRED';
   }
@@ -282,6 +298,8 @@ export const mapleradErrorToClientResponse = (error: MapleradProviderError) => {
         ? 'Complete the required verified profile details before wallet provisioning can continue.'
         : code === 'CUSTOMER_NOT_TIER1'
         ? 'Customer must complete Tier 1 KYC before a NGN virtual account can be created.'
+        : code === 'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED'
+        ? 'Maplerad NGN virtual account bank configuration is missing or invalid.'
         : error.message,
     providerStatus: error.providerStatus,
     providerMessage: error.providerMessage,
@@ -1348,6 +1366,45 @@ export class MapleRadService {
       .slice(0, 200);
   }
 
+  private requireNgnVirtualBankCode() {
+    const code = this.config.ngnVirtualBankCode;
+    if (!code) {
+      throw new MapleradProviderError(
+        'Maplerad NGN virtual account bank configuration is missing.',
+        'maplerad.virtual_account.create.prepare',
+        undefined,
+        'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED',
+        undefined,
+        { requiredConfig: 'MAPLERAD_NGN_VIRTUAL_BANK_CODE' },
+        'VALIDATION'
+      );
+    }
+    return code;
+  }
+
+  private virtualAccountCreateAcknowledgementError(input: {
+    data: unknown;
+    httpStatus?: number;
+    providerRequestId?: string;
+  }): MapleradProviderError | undefined {
+    const record = this.objectRecord(input.data);
+    const ackStatus = this.diagnosticString(record?.status);
+    const ackMessage = this.diagnosticString(record?.message);
+    const normalizedMessage = String(ackMessage || '').toLowerCase();
+    if (normalizedMessage.includes('please specify a bank code')) {
+      return new MapleradProviderError(
+        'Maplerad rejected NGN virtual account creation because no bank code was accepted.',
+        'maplerad.virtual_account.create',
+        input.httpStatus,
+        ackMessage,
+        input.providerRequestId,
+        { ackStatus, ackMessage },
+        'VALIDATION'
+      );
+    }
+    return undefined;
+  }
+
   private hasAnyVirtualAccountIdentityKey(value: unknown) {
     return ['id', 'account_id', 'reference', 'account_number', 'accountId', 'accountNumber'].some((key) =>
       this.hasObjectKey(value, key)
@@ -1504,6 +1561,29 @@ export class MapleRadService {
     const shape = this.customerAccountsResponseShape(response);
     logger.info('maplerad_customer_accounts_response_shape', shape);
     return shape;
+  }
+
+  private institutionCollection(data: any): unknown[] {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.institutions)) return data.institutions;
+    if (Array.isArray(data?.items)) return data.items;
+    return [];
+  }
+
+  private safeInstitutionMetadata(value: unknown): MapleradInstitution | undefined {
+    const record = this.objectRecord(value);
+    if (!record) return undefined;
+    const institution: MapleradInstitution = {};
+    const name = this.diagnosticString(record.name);
+    const code = this.diagnosticString(record.code);
+    const type = this.diagnosticString(record.type);
+    const country = this.diagnosticString(record.country);
+    if (name) institution.name = name;
+    if (code) institution.code = code;
+    if (type) institution.type = type;
+    if (country) institution.country = country;
+    return Object.keys(institution).length ? institution : undefined;
   }
 
   getLastVirtualAccountListResponseShape() {
@@ -2294,8 +2374,7 @@ export class MapleRadService {
         const operation = 'maplerad.virtual_account.create';
         const endpoint = '/collections/virtual-account';
         createDiagnostics = { operation, endpoint };
-        const payload = { customer_id: customerId, currency, preferred_bank: process.env.MAPLERAD_NGN_PREFERRED_BANK };
-        if (!payload.preferred_bank) delete (payload as Partial<typeof payload>).preferred_bank;
+        const payload = { customer_id: customerId, currency, preferred_bank: this.requireNgnVirtualBankCode() };
         const response = await this.requestMapleradRaw<MapleradVirtualAccount>({
           operation,
           method: 'POST',
@@ -2311,6 +2390,12 @@ export class MapleRadService {
         });
         this.logVirtualAccountCreateResponseShape({ operation, endpoint, response });
         data = this.unwrap<MapleradVirtualAccount>(response);
+        const acknowledgementError = this.virtualAccountCreateAcknowledgementError({
+          data,
+          httpStatus: response.status,
+          providerRequestId: this.providerRequestId(response.headers),
+        });
+        if (acknowledgementError) throw acknowledgementError;
       }
 
       if (!data?.account_number) {
@@ -2535,6 +2620,19 @@ async checkUsdAccountRequestStatus(reference: string): Promise<any> {
       })
     
     return res.data?.data ?? [];
+  }
+
+  async listNgnVirtualInstitutions(page = 1, pageSize = 100): Promise<MapleradInstitution[]> {
+    const response = await this.requestMapleradRaw<unknown>({
+      operation: 'maplerad.institutions.list_virtual_ng',
+      method: 'GET',
+      path: '/institutions',
+      params: { country: 'NG', type: 'VIRTUAL', page, page_size: pageSize },
+    });
+    const data = this.unwrap<unknown>(response);
+    return this.institutionCollection(data)
+      .map((entry) => this.safeInstitutionMetadata(entry))
+      .filter((entry): entry is MapleradInstitution => Boolean(entry));
   }
 
   async getBankCode(bankName: string, country = 'NG'): Promise<string> {

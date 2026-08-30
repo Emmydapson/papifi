@@ -50,6 +50,7 @@ function serviceWithMockedRequest(mock: (options: any) => Promise<any>, raw = tr
   process.env.MAPLERAD_SANDBOX_PUBLIC_KEY = 'pk_test_docs_only';
   process.env.MAPLERAD_SANDBOX_WEBHOOK_SECRET = 'whsec_cGFwYWZpLXRlc3Q=';
   process.env.MAPLERAD_BASE_URL = 'https://api.maplerad.com/v1';
+  process.env.MAPLERAD_NGN_VIRTUAL_BANK_CODE = 'test_virtual_bank';
   const service = new MapleRadService();
   if (raw) {
     (service as any).requestMapleradRaw = async (options: any) => {
@@ -806,7 +807,84 @@ test('createVirtualAccountForUser sends top-level customer_id after Tier 1 prefl
 
   assert.equal(observed.operation, 'maplerad.virtual_account.create');
   assert.equal(observed.path, '/collections/virtual-account');
-  assert.deepEqual(observed.payload, { customer_id: 'cus_1', currency: 'NGN' });
+  assert.deepEqual(observed.payload, { customer_id: 'cus_1', currency: 'NGN', preferred_bank: 'test_virtual_bank' });
+});
+
+test('createVirtualAccountForUser fails before provider POST when NGN virtual bank code is missing', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  (service as any).config.ngnVirtualBankCode = undefined;
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  let providerPostCalled = false;
+  const user = { id: 'user-1' };
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Wallet') return { findOne: async () => null, create: (value: any) => value, save: async (value: any) => value };
+      if (entity?.name === 'ProviderReference') return { findOne: async () => null, create: (value: any) => value, save: async (value: any) => value };
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async () => ({ id: 'cus_1', tier: '1' });
+  (service as any).getCustomerVirtualAccounts = async () => [];
+  (service as any).requestMapleradRaw = async () => {
+    providerPostCalled = true;
+    return { status: 200, headers: {}, data: {} };
+  };
+
+  try {
+    await assert.rejects(service.createVirtualAccountForUser('user-1', 'NGN'), (error: any) => {
+      assert.equal(mapleradErrorToApplicationCode(error), 'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED');
+      assert.notEqual(error.code, 'SCHEMA');
+      return true;
+    });
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
+
+  assert.equal(providerPostCalled, false);
+});
+
+test('createVirtualAccountForUser maps bank-code acknowledgement rejection without schema error', async () => {
+  const service = serviceWithMockedRequest(async () => null, false);
+  const originalTransaction = AppDataSource.transaction.bind(AppDataSource);
+  const user = { id: 'user-1' };
+  const manager: any = {
+    getRepository: (entity: any) => {
+      if (entity?.name === 'Wallet') return { findOne: async () => null, create: (value: any) => value, save: async (value: any) => value };
+      if (entity?.name === 'ProviderReference') return { findOne: async () => null, create: (value: any) => value, save: async (value: any) => value };
+      return {
+        createQueryBuilder: () => ({
+          where: () => ({ setLock: () => ({ getOne: async () => user }) }),
+        }),
+      };
+    },
+  };
+  (AppDataSource as any).transaction = async (callback: any) => callback(manager);
+  (service as any).ensureMapleRadCustomerForUser = async () => 'cus_1';
+  (service as any).getCustomerById = async () => ({ id: 'cus_1', tier: '1' });
+  (service as any).getCustomerVirtualAccounts = async () => [];
+  (service as any).requestMapleradRaw = async () => ({
+    status: 200,
+    headers: { 'x-request-id': 'req-bank-code' },
+    data: { status: 'success', message: 'please specify a bank code' },
+  });
+
+  try {
+    await assert.rejects(service.createVirtualAccountForUser('user-1', 'NGN'), (error: any) => {
+      assert.equal(mapleradErrorToApplicationCode(error), 'MAPLERAD_NGN_VIRTUAL_BANK_NOT_CONFIGURED');
+      assert.equal(error.providerStatus, 200);
+      assert.equal(error.requestId, 'req-bank-code');
+      assert.notEqual(error.code, 'SCHEMA');
+      return true;
+    });
+  } finally {
+    (AppDataSource as any).transaction = originalTransaction;
+  }
 });
 
 test('createVirtualAccountForUser continues with newly extracted customer id and persists it', async () => {
@@ -885,7 +963,7 @@ test('createVirtualAccountForUser continues with newly extracted customer id and
     (AppDataSource as any).transaction = originalTransaction;
   }
 
-  assert.deepEqual(virtualAccountRequest.payload, { customer_id: 'cus_wallet', currency: 'NGN' });
+  assert.deepEqual(virtualAccountRequest.payload, { customer_id: 'cus_wallet', currency: 'NGN', preferred_bank: 'test_virtual_bank' });
   const customerReference = references.find((ref) => ref.referenceType === 'customer');
   const accountReference = references.find((ref) => ref.referenceType === 'account' && ref.currency === 'NGN');
   assert.equal(customerReference.providerCustomerId, 'cus_wallet');
@@ -1088,7 +1166,7 @@ test('createVirtualAccountForUser repairs missing NGN wallet from existing provi
   (service as any).getCustomerVirtualAccounts = async () => [
     { id: 'ngn_acct_1', account_number: '1234567890', bank_name: 'NGN Bank', currency: 'NGN' },
   ];
-  (service as any).requestMaplerad = async (options: any) => {
+  (service as any).requestMapleradRaw = async (options: any) => {
     providerCreates.push(options);
     throw new Error('provider account create should not be called');
   };

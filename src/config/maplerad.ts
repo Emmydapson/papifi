@@ -6,6 +6,7 @@ export type ResolvedMapleradConfig = {
   baseUrl: string;
   secretKey: string;
   publicKey?: string;
+  ngnVirtualBankCode?: string;
   webhookSecret?: string;
   previousWebhookSecret?: string;
   webhookVerificationMode: MapleradWebhookVerificationMode;
@@ -46,6 +47,7 @@ const selectedEnvironment = (): MapleradEnvironment => {
 };
 
 const hasValue = (value?: string) => Boolean(value && value.trim() && value !== 'replace-me');
+const optionalValue = (value?: string) => (hasValue(value) ? value!.trim() : undefined);
 
 const environmentSecret = (environment: MapleradEnvironment) =>
   environment === 'sandbox' ? process.env.MAPLERAD_SANDBOX_SECRET_KEY : process.env.MAPLERAD_PRODUCTION_SECRET_KEY;
@@ -139,6 +141,7 @@ export const resolveMapleradConfig = (options: { allowMissingSignatureSecret?: b
     publicKey:
       environmentPublicKey(environment) ||
       (environment === 'sandbox' ? undefined : process.env.MAPLERAD_PUBLIC_KEY || process.env.MAPLERAD_PUBLIC),
+    ngnVirtualBankCode: optionalValue(process.env.MAPLERAD_NGN_VIRTUAL_BANK_CODE),
     webhookSecret: webhookSecretConfigured ? webhookSecret : undefined,
     previousWebhookSecret: hasValue(previousWebhookSecret) ? previousWebhookSecret : undefined,
     webhookVerificationMode,
@@ -155,5 +158,6 @@ export const mapleradStartupSummary = () => {
     environment: config.environment,
     baseUrl: config.baseUrl,
     secretConfigured: Boolean(config.secretKey),
+    ngnVirtualBankConfigured: Boolean(config.ngnVirtualBankCode),
   };
 };
