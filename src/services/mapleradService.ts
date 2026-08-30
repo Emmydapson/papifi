@@ -61,10 +61,28 @@ type MapleradVirtualAccount = {
   customer_id?: string;
 };
 
+type MapleradVirtualAccountCollectionKey = 'root' | 'accounts' | 'items' | 'virtual_accounts';
+
+type MapleradVirtualAccountResponseShape = {
+  operation: string;
+  endpoint: string;
+  httpStatus: number;
+  providerRequestId?: string;
+  topLevelKeys: string[];
+  dataLevelKeys: string[];
+  nestedDataLevelKeys: string[];
+  bodyIsArray: boolean;
+  unwrappedIsArray: boolean;
+  recognizedCollectionKey: MapleradVirtualAccountCollectionKey | null;
+  recognizedCollectionLength: number;
+  firstCollectionItemKeys: string[];
+};
+
 type MapleradRequestOptions = {
   operation: string;
   method: 'GET' | 'POST' | 'PATCH';
   path: string;
+  logPath?: string;
   payload?: unknown;
   params?: Record<string, unknown>;
 };
@@ -327,6 +345,7 @@ export class MapleRadService {
   private readonly webhookSecret = this.config.webhookSecret;
   private readonly previousWebhookSecret = this.config.previousWebhookSecret;
   private readonly webhookVerificationMode = this.config.webhookVerificationMode;
+  private lastVirtualAccountListResponseShape?: MapleradVirtualAccountResponseShape;
 
   private userRepo = AppDataSource.getRepository(User);
   private walletRepo = AppDataSource.getRepository(Wallet);
@@ -563,7 +582,7 @@ export class MapleRadService {
 
       logger.info('maplerad_provider_request_succeeded', {
         operation: options.operation,
-        endpoint: options.path,
+        endpoint: options.logPath || options.path,
         status: res.status,
         requestId: this.providerRequestId(res.headers),
       });
@@ -577,7 +596,7 @@ export class MapleRadService {
 
       logger.error('maplerad_provider_request_failed', new Error('Maplerad provider request failed'), {
         operation: options.operation,
-        endpoint: options.path,
+        endpoint: options.logPath || options.path,
         providerStatus: status,
         providerMessage,
         requestId,
@@ -1241,6 +1260,18 @@ export class MapleRadService {
     return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value as Record<string, unknown>).sort() : [];
   }
 
+  private virtualAccountCollection(data: any): { key: MapleradVirtualAccountCollectionKey | null; items: MapleradVirtualAccount[] } {
+    if (Array.isArray(data)) return { key: 'root', items: data };
+    if (Array.isArray(data?.accounts)) return { key: 'accounts', items: data.accounts };
+    if (Array.isArray(data?.items)) return { key: 'items', items: data.items };
+    if (Array.isArray(data?.virtual_accounts)) return { key: 'virtual_accounts', items: data.virtual_accounts };
+    return { key: null, items: [] };
+  }
+
+  getLastVirtualAccountListResponseShape() {
+    return this.lastVirtualAccountListResponseShape;
+  }
+
   private bvnDataFromEnvelope(envelope: unknown): Record<string, unknown> | undefined {
     if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) return undefined;
     const record = envelope as Record<string, unknown>;
@@ -1798,15 +1829,34 @@ export class MapleRadService {
   }
 
   async getCustomerVirtualAccounts(customerId: string): Promise<MapleradVirtualAccount[]> {
-    const data: any = await this.requestMaplerad({
-      operation: 'maplerad.virtual_account.list_for_customer',
+    const operation = 'maplerad.virtual_account.list_for_customer';
+    const endpoint = `/customers/${customerId}/virtual-account`;
+    const safeEndpoint = '/customers/{customerId}/virtual-account';
+    const response = await this.requestMapleradRaw<any>({
+      operation,
       method: 'GET',
-      path: `/customers/${customerId}/virtual-account`,
+      path: endpoint,
+      logPath: safeEndpoint,
     });
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.accounts)) return data.accounts;
-    if (Array.isArray(data?.items)) return data.items;
-    if (Array.isArray(data?.virtual_accounts)) return data.virtual_accounts;
+    const body = response.data;
+    const data: any = this.unwrap(response);
+    const collection = this.virtualAccountCollection(data);
+    this.lastVirtualAccountListResponseShape = {
+      operation,
+      endpoint: safeEndpoint,
+      httpStatus: response.status,
+      providerRequestId: this.providerRequestId(response.headers),
+      topLevelKeys: this.objectKeys(body),
+      dataLevelKeys: this.objectKeys((body as any)?.data),
+      nestedDataLevelKeys: this.objectKeys((body as any)?.data?.data),
+      bodyIsArray: Array.isArray(body),
+      unwrappedIsArray: Array.isArray(data),
+      recognizedCollectionKey: collection.key,
+      recognizedCollectionLength: collection.items.length,
+      firstCollectionItemKeys: collection.items.length ? this.objectKeys(collection.items[0]) : [],
+    };
+    logger.info('maplerad_virtual_account_response_shape', this.lastVirtualAccountListResponseShape);
+    if (collection.key) return collection.items;
     return [];
   }
 

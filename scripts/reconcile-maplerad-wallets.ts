@@ -83,8 +83,9 @@ async function main() {
       throw new Error('No verified environment-specific Maplerad customer reference exists. Link the customer first.');
     }
 
-    const providerAccounts = (await service.getCustomerVirtualAccounts(customerReference.providerCustomerId))
-      .filter((account) => currencyOf(account));
+    const parsedProviderAccounts = await service.getCustomerVirtualAccounts(customerReference.providerCustomerId);
+    const virtualAccountShape = service.getLastVirtualAccountListResponseShape();
+    const providerAccounts = parsedProviderAccounts.filter((account) => currencyOf(account));
     const byCurrency = new Map<Currency, any[]>();
     for (const account of providerAccounts) {
       const currency = currencyOf(account)!;
@@ -123,8 +124,11 @@ async function main() {
 
     console.log(`Maplerad wallet reconciliation (${environment})`);
     console.log(`Papafi user id: ${userId}`);
+    console.log(`Provider virtual accounts parsed: ${parsedProviderAccounts.length}`);
+    console.log(`Recognized response collection: ${virtualAccountShape?.recognizedCollectionKey || 'none'}`);
+    console.log(`Candidate reconciliations: ${planned.length}`);
     for (const item of planned) {
-      console.log(`${item.currency}: account=${item.maskedAccountNumber || '[unavailable]'} bank=${item.bankName || '[unavailable]'} createWallet=${item.createWallet ? 'yes' : 'no'} createProviderReference=${item.createProviderReference ? 'yes' : 'no'}`);
+      console.log(`${item.currency}: createWallet=${item.createWallet ? 'yes' : 'no'} createProviderReference=${item.createProviderReference ? 'yes' : 'no'}`);
     }
     if (!confirmed) {
       console.log('Dry run only. Rerun with --confirm to create missing local rows.');
